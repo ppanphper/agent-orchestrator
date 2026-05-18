@@ -19,6 +19,7 @@ import { getSessionTitle } from "@/lib/format";
 import { CICheckList } from "./CIBadge";
 import { getSizeLabel } from "./PRStatus";
 import { projectSessionHashPath, projectSessionPath } from "@/lib/routes";
+import { useI18n } from "@/lib/i18n";
 
 /**
  * Tracks which session IDs have already played their entrance animation.
@@ -127,6 +128,7 @@ function getDoneStatusInfo(session: DashboardSession): {
 }
 
 function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: SessionCardProps) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [sendingAction, setSendingAction] = useState<string | null>(null);
   const [failedAction, setFailedAction] = useState<string | null>(null);
@@ -299,7 +301,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                 <polyline points="1 4 1 10 7 10" />
                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
-              restore
+              {t("session.restore")}
             </button>
           )}
         </div>
@@ -358,7 +360,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
             onClick={(e) => e.stopPropagation()}
             className="done-meta-chip font-[var(--font-mono)] font-semibold text-[var(--color-accent)] no-underline hover:underline"
           >
-            View current context
+            {t("session.viewCurrentContext")}
           </a>
         </div>
 
@@ -371,7 +373,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                   <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M4 6h16M4 12h16M4 18h10" />
                   </svg>
-                  Summary
+                  {t("session.summary")}
                 </div>
                 <p className="text-[12px] leading-relaxed text-[var(--color-text-secondary)]">
                   {session.summary}
@@ -386,7 +388,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     <circle cx="12" cy="12" r="10" />
                     <path d="M12 8v4M12 16h.01" />
                   </svg>
-                  Issue
+                  {t("session.issue")}
                 </div>
                 <a
                   href={session.issueUrl}
@@ -408,7 +410,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     <path d="M9 12l2 2 4-4" />
                     <circle cx="12" cy="12" r="10" />
                   </svg>
-                  CI Checks
+                  {t("session.ciChecks")}
                 </div>
                 <CICheckList checks={pr.ciChecks} />
               </div>
@@ -438,7 +440,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                       <br />
                       <span className="mt-1 inline-flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
                         <span className="inline-block h-3 w-12 animate-pulse rounded bg-[var(--color-bg-subtle)]" />
-                        <span>PR details loading...</span>
+                        <span>{t("session.prDetailsLoading")}</span>
                       </span>
                     </>
                   ) : (
@@ -451,11 +453,11 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                         </span>
                         <span className="text-[var(--color-text-muted)]">·</span>
                         <span className="text-[10px] text-[var(--color-text-muted)]">
-                          mergeable: {pr.mergeability.mergeable ? "yes" : "no"}
+                          {t("session.mergeable")}: {pr.mergeability.mergeable ? "yes" : "no"}
                         </span>
                         <span className="text-[var(--color-text-muted)]">·</span>
                         <span className="text-[10px] text-[var(--color-text-muted)]">
-                          review: {pr.reviewDecision}
+                          {t("session.review")}: {pr.reviewDecision}
                         </span>
                       </span>
                     </>
@@ -465,9 +467,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
             )}
 
             {!pr && (
-              <p className="text-[12px] text-[var(--color-text-tertiary)]">
-                No PR associated with this session.
-              </p>
+              <p className="text-[12px] text-[var(--color-text-tertiary)]">{t("session.noPr")}</p>
             )}
 
             {/* Action buttons — restore already shown in header row */}
@@ -530,7 +530,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
               <path d="M4 13a8 8 0 0 0 14.9 3.98" />
               <path d="M20 19v-4h-4" />
             </svg>
-            restore
+            {t("session.restore")}
           </button>
         )}
         {!isTerminal && (
@@ -554,7 +554,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
               <path d="M6 10l4 2-4 2" />
               <path d="M14 14h4" />
             </svg>
-            terminal
+            {t("session.terminal")}
           </a>
         )}
       </div>
@@ -642,7 +642,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8v4M12 16h.01" />
               </svg>
-              PR data rate limited
+              {t("session.prRateLimited")}
             </span>
           </div>
         )}
@@ -706,9 +706,9 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     {alert.label}
                   </a>
                   {alert.notified && (
-                    <span className="alert-row__notified" title="Agent has been notified">
+                    <span className="alert-row__notified" title={t("session.agentNotified")}>
                       {" "}
-                      &middot; notified
+                      &middot; {t("session.agentNotified")}
                     </span>
                   )}
                 </span>
@@ -722,9 +722,9 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     className="alert-row__action"
                   >
                     {sendingAction === alert.key
-                      ? "sent!"
+                      ? t("session.sent")
                       : failedAction === alert.key
-                        ? "failed"
+                        ? t("session.failed")
                         : alert.actionLabel}
                   </button>
                 )}
@@ -757,7 +757,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
               onClick={(e) => e.stopPropagation()}
               className="card__view-context"
             >
-              View current context →
+              {t("session.viewCurrentContext")} →
             </a>
             {!isTerminal && (
               <>
@@ -768,10 +768,10 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     disabled={sendingQuickReply !== null}
                   >
                     {sendingQuickReply === "continue"
-                      ? "Sending..."
+                      ? t("session.sending")
                       : sentQuickReply === "continue"
-                        ? "Sent"
-                        : "Continue"}
+                        ? t("session.sentShort")
+                        : t("session.continue")}
                   </button>
                   <button
                     className="card__preset"
@@ -779,10 +779,10 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     disabled={sendingQuickReply !== null}
                   >
                     {sendingQuickReply === "abort"
-                      ? "Sending..."
+                      ? t("session.sending")
                       : sentQuickReply === "abort"
-                        ? "Sent"
-                        : "Abort"}
+                        ? t("session.sentShort")
+                        : t("session.abort")}
                   </button>
                   <button
                     className="card__preset"
@@ -790,19 +790,21 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                     disabled={sendingQuickReply !== null}
                   >
                     {sendingQuickReply === "skip"
-                      ? "Sending..."
+                      ? t("session.sending")
                       : sentQuickReply === "skip"
-                        ? "Sent"
-                        : "Skip"}
+                        ? t("session.sentShort")
+                        : t("session.skip")}
                   </button>
                 </div>
                 <div className="card__reply-wrap">
                   <textarea
                     className="card__reply"
                     placeholder={
-                      sendingQuickReply !== null ? "Sending..." : "Type a reply... (Enter to send)"
+                      sendingQuickReply !== null
+                        ? t("session.sending")
+                        : t("session.replyPlaceholder")
                     }
-                    aria-label="Type a reply to the agent"
+                    aria-label={t("session.replyLabel")}
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
                     onKeyDown={(e) => {
@@ -846,7 +848,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                 <circle cx="18" cy="6" r="2" />
                 <path d="M8 6h5a3 3 0 0 1 3 3v7" />
               </svg>
-              Merge PR #{pr.number}
+              {t("session.mergePr", { number: pr.number })}
             </button>
           ) : (
             !isTerminal && (
@@ -854,7 +856,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
                 onClick={handleKillClick}
                 onMouseLeave={() => setKillConfirming(false)}
                 onBlur={() => setKillConfirming(false)}
-                aria-label={killConfirming ? "Confirm terminate session" : "Terminate session"}
+                aria-label={killConfirming ? t("session.confirmTerminate") : t("session.terminate")}
                 className={cn(
                   "session-card__control session-card__terminate btn--danger",
                   killConfirming && "is-confirming",
@@ -862,7 +864,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
               >
                 {killConfirming ? (
                   <span className="font-mono text-[10px] font-semibold tracking-[0.04em]">
-                    kill?
+                    {t("session.killConfirm")}
                   </span>
                 ) : (
                   <svg

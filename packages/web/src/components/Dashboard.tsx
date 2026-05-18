@@ -29,6 +29,7 @@ import { ProjectSidebar } from "./ProjectSidebar";
 import { isOrchestratorSession } from "@aoagents/ao-core/types";
 import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { BottomSheet } from "./BottomSheet";
+import { useI18n } from "@/lib/i18n";
 
 interface DashboardProps {
   initialSessions: DashboardSession[];
@@ -85,6 +86,7 @@ function DoneCard({
   session: DashboardSession;
   onRestore: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const title =
     (!session.summaryIsFallback && session.summary) ||
     session.issueTitle ||
@@ -93,7 +95,11 @@ function DoneCard({
   const isMerged = session.pr?.state === "merged" || session.status === "merged";
   const isTerminated = isDashboardSessionTerminated(session);
   const canRestore = isDashboardSessionRestorable(session);
-  const badgeLabel = isMerged ? "merged" : isTerminated ? "terminated" : "done";
+  const badgeLabel = isMerged
+    ? t("done.merged")
+    : isTerminated
+      ? t("done.terminated")
+      : t("done.done");
   const badgeClass = `done-card__badge ${isTerminated ? "done-card__badge--terminated" : "done-card__badge--merged"}`;
 
   return (
@@ -134,7 +140,7 @@ function DoneCard({
               onRestore(session.id);
             }}
           >
-            Restore
+            {t("done.restore")}
           </button>
         ) : null}
       </div>
@@ -151,6 +157,7 @@ function DashboardInner({
   attentionZones = "simple",
   dashboardLoadError,
 }: DashboardProps) {
+  const { t } = useI18n();
   const orchestratorLinks = orchestrators ?? EMPTY_ORCHESTRATORS;
   const mux = useMuxOptional();
   const kanbanLevels =
@@ -222,7 +229,10 @@ function DashboardInner({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const handleToggleSidebar = useCallback(() => {
-    if (isInsideLayout && parentCtx) { parentCtx.onToggleSidebar(); return; }
+    if (isInsideLayout && parentCtx) {
+      parentCtx.onToggleSidebar();
+      return;
+    }
     if (isMobile) {
       setMobileSidebarOpen((v) => !v);
     } else {
@@ -278,8 +288,11 @@ function DashboardInner({
   useEffect(() => {
     const needsAttention = countNeedingAttention(attentionLevels);
     const label = projectName ?? "ao";
-    document.title = needsAttention > 0 ? `${label} (${needsAttention} need attention)` : label;
-  }, [attentionLevels, projectName]);
+    document.title =
+      needsAttention > 0
+        ? `${label} (${t("dashboard.needAttention", { count: needsAttention })})`
+        : label;
+  }, [attentionLevels, projectName, t]);
 
   const grouped = useMemo(() => {
     const zones: Record<AttentionLevel, DashboardSession[]> = {
@@ -352,7 +365,7 @@ function DashboardInner({
           const text = await res.text();
           const messageText = text || "Unknown error";
           console.error(`Failed to send message to ${sessionId}:`, messageText);
-          showToast(`Send failed: ${messageText}`, "error");
+          showToast(t("dashboard.sendFailed", { message: messageText }), "error");
           const errorWithToast = new Error(messageText);
           (errorWithToast as Error & { toastShown?: boolean }).toastShown = true;
           throw errorWithToast;
@@ -364,12 +377,12 @@ function DashboardInner({
           (error as Error & { toastShown?: boolean }).toastShown;
         if (!toastShown) {
           console.error(`Network error sending message to ${sessionId}:`, error);
-          showToast("Network error while sending message", "error");
+          showToast(t("dashboard.sendNetworkError"), "error");
         }
         throw error;
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const killSession = useCallback(
@@ -381,16 +394,16 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to kill ${sessionId}:`, text);
-          showToast(`Terminate failed: ${text}`, "error");
+          showToast(t("dashboard.terminateFailed", { message: text }), "error");
         } else {
-          showToast("Session terminated", "success");
+          showToast(t("dashboard.terminated"), "success");
         }
       } catch (error) {
         console.error(`Network error killing ${sessionId}:`, error);
-        showToast("Network error while terminating session", "error");
+        showToast(t("dashboard.terminateNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleKill = useCallback(
@@ -428,17 +441,17 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to merge PR #${prNumber}:`, text);
-          showToast(`Merge failed: ${text}`, "error");
+          showToast(t("dashboard.mergeFailed", { message: text }), "error");
           return;
         } else {
-          showToast(`PR #${prNumber} merged`, "success");
+          showToast(t("dashboard.merged", { number: prNumber }), "success");
         }
       } catch (error) {
         console.error(`Network error merging PR #${prNumber}:`, error);
-        showToast("Network error while merging PR", "error");
+        showToast(t("dashboard.mergeNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleRestore = useCallback(
@@ -450,17 +463,17 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to restore ${sessionId}:`, text);
-          showToast(`Restore failed: ${text}`, "error");
+          showToast(t("dashboard.restoreFailed", { message: text }), "error");
         } else {
-          showToast("Session restored", "success");
+          showToast(t("dashboard.restored"), "success");
           routerRef.current.refresh();
         }
       } catch (error) {
         console.error(`Network error restoring ${sessionId}:`, error);
-        showToast("Network error while restoring session", "error");
+        showToast(t("dashboard.restoreNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleSpawnOrchestrator = async (project: ProjectInfo) => {
@@ -482,7 +495,7 @@ function DashboardInner({
       } | null;
 
       if (!res.ok || !data?.orchestrator) {
-        throw new Error(data?.error ?? `Failed to spawn orchestrator for ${project.name}`);
+        throw new Error(data?.error ?? `${t("dashboard.spawnFailed")} ${project.name}`);
       }
 
       const orchestrator = data.orchestrator;
@@ -493,7 +506,7 @@ function DashboardInner({
         return next;
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to spawn orchestrator";
+      const message = error instanceof Error ? error.message : t("dashboard.spawnFailed");
       setSpawnErrors((current) => ({ ...current, [project.id]: message }));
       console.error(`Failed to spawn orchestrator for ${project.id}:`, error);
     } finally {
@@ -511,13 +524,10 @@ function DashboardInner({
       aria-live="assertive"
     >
       <span className="font-semibold text-[var(--color-status-error)]">
-        Orchestrator failed to load
+        {t("dashboard.loadFailed")}
       </span>
       <span className="break-words text-[var(--color-text-secondary)]">{visibleLoadError}</span>
-      <span className="text-[var(--color-text-secondary)]">
-        Confirm <span className="font-mono text-[10px]">agent-orchestrator.yaml</span> exists and is
-        valid, then run <span className="font-mono text-[10px]">ao doctor</span> for diagnostics.
-      </span>
+      <span className="text-[var(--color-text-secondary)]">{t("dashboard.loadHint")}</span>
     </div>
   ) : null;
 
@@ -528,8 +538,8 @@ function DashboardInner({
   const normalizedProjectName = projectName?.trim().toLowerCase();
   const headerProjectLabel =
     normalizedProjectName === "agent orchestrator"
-      ? (projectId ?? projectName ?? (allProjectsView ? "All projects" : "Dashboard"))
-      : (projectName ?? (allProjectsView ? "All projects" : "Dashboard"));
+      ? (projectId ?? projectName ?? (allProjectsView ? t("app.allProjects") : t("app.dashboard")))
+      : (projectName ?? (allProjectsView ? t("app.allProjects") : t("app.dashboard")));
   const showHeaderProjectLabel = !allProjectsView && headerProjectLabel.trim().length > 0;
 
   const handleZoneToggle = (level: AttentionLevel) => {
@@ -546,274 +556,277 @@ function DashboardInner({
 
   const mainPanel = (
     <div className="dashboard-main--desktop">
-        <header className="dashboard-app-header">
-          <button
-            type="button"
-            className="dashboard-app-sidebar-toggle"
-            onClick={handleToggleSidebar}
-            aria-label="Toggle sidebar"
-          >
-            {isMobile ? (
+      <header className="dashboard-app-header">
+        <button
+          type="button"
+          className="dashboard-app-sidebar-toggle"
+          onClick={handleToggleSidebar}
+          aria-label="Toggle sidebar"
+        >
+          {isMobile ? (
+            <svg
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          ) : (
+            <svg
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" />
+            </svg>
+          )}
+        </button>
+        <div className="dashboard-app-header__brand dashboard-app-header__brand--hide-mobile">
+          <span>{t("app.name")}</span>
+        </div>
+        {showHeaderProjectLabel ? (
+          <>
+            <span className="dashboard-app-header__sep topbar-desktop-only" aria-hidden="true" />
+            <div className="topbar-project-pills-group">
+              <div className="topbar-project-line">
+                <span className="dashboard-app-header__project">{headerProjectLabel}</span>
+              </div>
+              {!allProjectsView && projectSessions.length > 0 ? (
+                <div className="topbar-session-pills">
+                  {grouped.working.length > 0 ? (
+                    <div className="topbar-status-pill topbar-status-pill--active">
+                      <span className="topbar-status-pill__dot topbar-status-pill__dot--working" />
+                      <span className="topbar-status-pill__label">
+                        {t("dashboard.workingCount", { count: grouped.working.length })}
+                      </span>
+                    </div>
+                  ) : null}
+                  {grouped.merge.length +
+                    grouped.action.length +
+                    grouped.respond.length +
+                    grouped.review.length >
+                  0 ? (
+                    <div className="topbar-status-pill topbar-status-pill--waiting-for-input">
+                      <span className="topbar-status-pill__dot topbar-status-pill__dot--attention" />
+                      <span className="topbar-status-pill__label">
+                        {t("dashboard.needAttention", {
+                          count:
+                            grouped.merge.length +
+                            grouped.action.length +
+                            grouped.respond.length +
+                            grouped.review.length,
+                        })}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+        <div className="dashboard-app-header__spacer" />
+        <div className="dashboard-app-header__actions">
+          {showDebugBundleButton ? <CopyDebugBundleButton projectId={projectId} /> : null}
+          {!allProjectsView && orchestratorHref ? (
+            <Link
+              href={orchestratorHref}
+              className="dashboard-app-btn dashboard-app-btn--amber"
+              aria-label={t("dashboard.orchestrator")}
+            >
               <svg
-                width="16"
-                height="16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
+                <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
+                <circle cx="6" cy="17" r="2" />
+                <circle cx="12" cy="17" r="2" />
+                <circle cx="18" cy="17" r="2" />
+              </svg>
+              {t("dashboard.orchestrator")}
+            </Link>
+          ) : canSpawnProjectOrchestrator && activeProject ? (
+            <button
+              type="button"
+              className="dashboard-app-btn dashboard-app-btn--amber"
+              aria-label={t("dashboard.spawnOrchestrator")}
+              onClick={() => void handleSpawnOrchestrator(activeProject)}
+              disabled={isSpawningCurrentProject}
+            >
+              <svg
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
+                <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
+                <circle cx="6" cy="17" r="2" />
+                <circle cx="12" cy="17" r="2" />
+                <circle cx="18" cy="17" r="2" />
+              </svg>
+              {isSpawningCurrentProject
+                ? t("dashboard.spawning")
+                : t("dashboard.spawnOrchestrator")}
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      <main className="dashboard-main flex-1 min-h-0 overflow-hidden">
+        <DynamicFavicon attentionLevels={attentionLevels} projectName={projectName} />
+        <div className="dashboard-main__subhead">
+          <h1 className="dashboard-main__title">{t("dashboard.title")}</h1>
+          <p className="dashboard-main__subtitle">{t("dashboard.subtitle")}</p>
+        </div>
+
+        <div className="dashboard-main__body">
+          {loadErrorBanner}
+          {anyRateLimited && !rateLimitDismissed && (
+            <div className="dashboard-alert mb-4 flex items-center gap-2.5 border border-[color-mix(in_srgb,var(--color-status-attention)_25%,transparent)] bg-[var(--color-tint-yellow)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
+              <svg
+                className="h-3.5 w-3.5 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
                 viewBox="0 0 24 24"
-                aria-hidden="true"
               >
-                <path d="M4 6h16M4 12h16M4 18h16" />
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
               </svg>
-            ) : (
-              <svg
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M9 3v18" />
-              </svg>
-            )}
-          </button>
-          <div className="dashboard-app-header__brand dashboard-app-header__brand--hide-mobile">
-            <span>Agent Orchestrator</span>
-          </div>
-          {showHeaderProjectLabel ? (
-            <>
-              <span className="dashboard-app-header__sep topbar-desktop-only" aria-hidden="true" />
-              <div className="topbar-project-pills-group">
-                <div className="topbar-project-line">
-                  <span className="dashboard-app-header__project">{headerProjectLabel}</span>
-                </div>
-                {!allProjectsView && projectSessions.length > 0 ? (
-                  <div className="topbar-session-pills">
-                    {grouped.working.length > 0 ? (
-                      <div className="topbar-status-pill topbar-status-pill--active">
-                        <span className="topbar-status-pill__dot topbar-status-pill__dot--working" />
-                        <span className="topbar-status-pill__label">
-                          {grouped.working.length} working
-                        </span>
-                      </div>
-                    ) : null}
-                    {grouped.merge.length +
-                      grouped.action.length +
-                      grouped.respond.length +
-                      grouped.review.length >
-                    0 ? (
-                      <div className="topbar-status-pill topbar-status-pill--waiting-for-input">
-                        <span className="topbar-status-pill__dot topbar-status-pill__dot--attention" />
-                        <span className="topbar-status-pill__label">
-                          {grouped.merge.length +
-                            grouped.action.length +
-                            grouped.respond.length +
-                            grouped.review.length}{" "}
-                          need attention
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-          <div className="dashboard-app-header__spacer" />
-          <div className="dashboard-app-header__actions">
-            {showDebugBundleButton ? <CopyDebugBundleButton projectId={projectId} /> : null}
-            {!allProjectsView && orchestratorHref ? (
-              <Link
-                href={orchestratorHref}
-                className="dashboard-app-btn dashboard-app-btn--amber"
-                aria-label="Orchestrator"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
-                  <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
-                  <circle cx="6" cy="17" r="2" />
-                  <circle cx="12" cy="17" r="2" />
-                  <circle cx="18" cy="17" r="2" />
-                </svg>
-                Orchestrator
-              </Link>
-            ) : canSpawnProjectOrchestrator && activeProject ? (
+              <span className="flex-1">{t("dashboard.rateLimited")}</span>
               <button
-                type="button"
-                className="dashboard-app-btn dashboard-app-btn--amber"
-                aria-label="Spawn Orchestrator"
-                onClick={() => void handleSpawnOrchestrator(activeProject)}
-                disabled={isSpawningCurrentProject}
+                onClick={() => setRateLimitDismissed(true)}
+                className="ml-1 shrink-0 opacity-60 hover:opacity-100"
+                aria-label={t("common.dismiss")}
               >
                 <svg
-                  width="12"
-                  height="12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
-                  <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
-                  <circle cx="6" cy="17" r="2" />
-                  <circle cx="12" cy="17" r="2" />
-                  <circle cx="18" cy="17" r="2" />
-                </svg>
-                {isSpawningCurrentProject ? "Spawning..." : "Spawn Orchestrator"}
-              </button>
-            ) : null}
-          </div>
-        </header>
-
-        <main className="dashboard-main flex-1 min-h-0 overflow-hidden">
-          <DynamicFavicon attentionLevels={attentionLevels} projectName={projectName} />
-          <div className="dashboard-main__subhead">
-            <h1 className="dashboard-main__title">Dashboard</h1>
-            <p className="dashboard-main__subtitle">
-              Live agent sessions, pull requests, and merge status.
-            </p>
-          </div>
-
-          <div className="dashboard-main__body">
-            {loadErrorBanner}
-            {anyRateLimited && !rateLimitDismissed && (
-              <div className="dashboard-alert mb-4 flex items-center gap-2.5 border border-[color-mix(in_srgb,var(--color-status-attention)_25%,transparent)] bg-[var(--color-tint-yellow)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
-                <svg
-                  className="h-3.5 w-3.5 shrink-0"
+                  className="h-3.5 w-3.5"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
                   viewBox="0 0 24 24"
                 >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 8v4M12 16h.01" />
+                  <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
-                <span className="flex-1">
-                  GitHub API rate limited — PR data (CI status, review state, sizes) may be stale.
-                  Will retry automatically on next refresh.
-                </span>
-                <button
-                  onClick={() => setRateLimitDismissed(true)}
-                  className="ml-1 shrink-0 opacity-60 hover:opacity-100"
-                  aria-label="Dismiss"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M18 6 6 18M6 6l12 12" />
-                  </svg>
-                </button>
+              </button>
+            </div>
+          )}
+
+          {allProjectsView && (
+            <ProjectOverviewGrid
+              overviews={projectOverviews}
+              onSpawnOrchestrator={handleSpawnOrchestrator}
+              spawningProjectIds={spawningProjectIds}
+              spawnErrors={spawnErrors}
+              attentionZones={attentionZones}
+            />
+          )}
+
+          {!allProjectsView && hasAnySessions && (
+            <div className="kanban-board-wrap">
+              <div
+                className="kanban-board"
+                data-columns={kanbanLevels.length}
+                style={
+                  {
+                    "--kanban-column-count": kanbanLevels.length,
+                  } as React.CSSProperties
+                }
+              >
+                {kanbanLevels.map((level) => (
+                  <AttentionZone
+                    key={level}
+                    level={level}
+                    sessions={grouped[level]}
+                    onSend={handleSend}
+                    onKill={handleKill}
+                    onMerge={handleMerge}
+                    onRestore={handleRestore}
+                    compactMobile={isMobile}
+                    collapsed={isMobile && collapsedZones.has(level)}
+                    onToggle={isMobile ? handleZoneToggle : undefined}
+                    onPreview={isMobile ? handlePreview : undefined}
+                  />
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {allProjectsView && (
-              <ProjectOverviewGrid
-                overviews={projectOverviews}
-                onSpawnOrchestrator={handleSpawnOrchestrator}
-                spawningProjectIds={spawningProjectIds}
-                spawnErrors={spawnErrors}
-                attentionZones={attentionZones}
-              />
-            )}
+          {showEmptyState ? (
+            <EmptyState
+              orchestratorHref={orchestratorHref}
+              onSpawnOrchestrator={
+                canSpawnProjectOrchestrator && activeProject
+                  ? () => {
+                      void handleSpawnOrchestrator(activeProject);
+                    }
+                  : null
+              }
+              spawnLabel={
+                isSpawningCurrentProject
+                  ? t("dashboard.spawning")
+                  : t("dashboard.spawnOrchestrator")
+              }
+              spawnDisabled={isSpawningCurrentProject}
+            />
+          ) : null}
 
-            {!allProjectsView && hasAnySessions && (
-              <div className="kanban-board-wrap">
-                <div
-                  className="kanban-board"
-                  data-columns={kanbanLevels.length}
-                  style={
-                    {
-                      "--kanban-column-count": kanbanLevels.length,
-                    } as React.CSSProperties
-                  }
+          {!allProjectsView && currentProjectSpawnError ? (
+            <p className="mt-3 text-[11px] text-[var(--color-status-error)]">
+              {currentProjectSpawnError}
+            </p>
+          ) : null}
+
+          {!allProjectsView && grouped.done.length > 0 && (
+            <div className="done-bar mt-6">
+              <button
+                type="button"
+                className="done-bar__toggle"
+                onClick={() => setDoneExpanded((v) => !v)}
+                aria-expanded={doneExpanded}
+              >
+                <svg
+                  className={`done-bar__chevron${doneExpanded ? " done-bar__chevron--open" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
                 >
-                  {kanbanLevels.map((level) => (
-                    <AttentionZone
-                      key={level}
-                      level={level}
-                      sessions={grouped[level]}
-                      onSend={handleSend}
-                      onKill={handleKill}
-                      onMerge={handleMerge}
-                      onRestore={handleRestore}
-                      compactMobile={isMobile}
-                      collapsed={isMobile && collapsedZones.has(level)}
-                      onToggle={isMobile ? handleZoneToggle : undefined}
-                      onPreview={isMobile ? handlePreview : undefined}
-                    />
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                <span className="done-bar__label">{t("dashboard.doneTerminated")}</span>
+                <span className="done-bar__count">{grouped.done.length}</span>
+              </button>
+              {doneExpanded && (
+                <div className="done-bar__cards">
+                  {grouped.done.map((session) => (
+                    <DoneCard key={session.id} session={session} onRestore={handleRestore} />
                   ))}
                 </div>
-              </div>
-            )}
-
-            {showEmptyState ? (
-              <EmptyState
-                orchestratorHref={orchestratorHref}
-                onSpawnOrchestrator={
-                  canSpawnProjectOrchestrator && activeProject
-                    ? () => {
-                        void handleSpawnOrchestrator(activeProject);
-                      }
-                    : null
-                }
-                spawnLabel={isSpawningCurrentProject ? "Spawning..." : "Spawn Orchestrator"}
-                spawnDisabled={isSpawningCurrentProject}
-              />
-            ) : null}
-
-            {!allProjectsView && currentProjectSpawnError ? (
-              <p className="mt-3 text-[11px] text-[var(--color-status-error)]">
-                {currentProjectSpawnError}
-              </p>
-            ) : null}
-
-            {!allProjectsView && grouped.done.length > 0 && (
-              <div className="done-bar mt-6">
-                <button
-                  type="button"
-                  className="done-bar__toggle"
-                  onClick={() => setDoneExpanded((v) => !v)}
-                  aria-expanded={doneExpanded}
-                >
-                  <svg
-                    className={`done-bar__chevron${doneExpanded ? " done-bar__chevron--open" : ""}`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path d="m9 18 6-6-6-6" />
-                  </svg>
-                  <span className="done-bar__label">Done / Terminated</span>
-                  <span className="done-bar__count">{grouped.done.length}</span>
-                </button>
-                {doneExpanded && (
-                  <div className="done-bar__cards">
-                    {grouped.done.map((session) => (
-                      <DoneCard key={session.id} session={session} onRestore={handleRestore} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </main>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 
@@ -864,10 +877,7 @@ function DashboardInner({
             />
           </div>
           {mobileSidebarOpen && (
-            <div
-              className="sidebar-mobile-backdrop"
-              onClick={() => setMobileSidebarOpen(false)}
-            />
+            <div className="sidebar-mobile-backdrop" onClick={() => setMobileSidebarOpen(false)} />
           )}
           {mainPanel}
         </div>
@@ -904,6 +914,8 @@ function ProjectOverviewGrid({
   spawnErrors: Record<string, string>;
   attentionZones: DashboardAttentionZoneMode;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {overviews.map(({ project, orchestrator, sessionCount, openPRCount, counts }) =>
@@ -923,12 +935,18 @@ function ProjectOverviewGrid({
                   </h2>
                   <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
                     {isDegraded ? (
-                      "Config needs repair"
+                      t("projects.configNeedsRepair")
                     ) : (
                       <>
-                        {sessionCount} active session{sessionCount !== 1 ? "s" : ""}
+                        {t("projects.activeSessions", {
+                          count: sessionCount,
+                          plural: sessionCount !== 1 ? "s" : "",
+                        })}
                         {openPRCount > 0
-                          ? ` · ${openPRCount} open PR${openPRCount !== 1 ? "s" : ""}`
+                          ? ` · ${t("projects.openPRs", {
+                              count: openPRCount,
+                              plural: openPRCount !== 1 ? "s" : "",
+                            })}`
                           : ""}
                       </>
                     )}
@@ -938,39 +956,63 @@ function ProjectOverviewGrid({
                   href={projectHref}
                   className="border border-[var(--color-border-default)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:no-underline"
                 >
-                  Open project
+                  {t("projects.openProject")}
                 </Link>
               </div>
 
               <div className="mb-4 flex flex-wrap gap-2">
-                <ProjectMetric label="Merge" value={counts.merge} tone="ready" />
+                <ProjectMetric
+                  label={t("projects.metrics.merge")}
+                  value={counts.merge}
+                  tone="ready"
+                />
                 {attentionZones === "detailed" ? (
                   <>
-                    <ProjectMetric label="Respond" value={counts.respond} tone="error" />
-                    <ProjectMetric label="Review" value={counts.review} tone="orange" />
+                    <ProjectMetric
+                      label={t("projects.metrics.respond")}
+                      value={counts.respond}
+                      tone="error"
+                    />
+                    <ProjectMetric
+                      label={t("projects.metrics.review")}
+                      value={counts.review}
+                      tone="orange"
+                    />
                   </>
                 ) : (
-                  <ProjectMetric label="Action" value={counts.action} tone="orange" />
+                  <ProjectMetric
+                    label={t("projects.metrics.action")}
+                    value={counts.action}
+                    tone="orange"
+                  />
                 )}
-                <ProjectMetric label="Pending" value={counts.pending} tone="attention" />
-                <ProjectMetric label="Working" value={counts.working} tone="working" />
+                <ProjectMetric
+                  label={t("projects.metrics.pending")}
+                  value={counts.pending}
+                  tone="attention"
+                />
+                <ProjectMetric
+                  label={t("projects.metrics.working")}
+                  value={counts.working}
+                  tone="working"
+                />
               </div>
 
               <div className="border-t border-[var(--color-border-subtle)] pt-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] text-[var(--color-text-muted)]">
                     {isDegraded
-                      ? "Project config could not be resolved"
+                      ? t("projects.configUnresolved")
                       : orchestrator
-                        ? "Per-project orchestrator available"
-                        : "No running orchestrator"}
+                        ? t("projects.orchestratorAvailable")
+                        : t("projects.noOrchestrator")}
                   </div>
                   {isDegraded ? (
                     <Link
                       href={projectHref}
                       className="border border-[var(--color-border-default)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:no-underline"
                     >
-                      Repair project
+                      {t("projects.repairProject")}
                     </Link>
                   ) : orchestrator ? (
                     <Link
@@ -978,7 +1020,7 @@ function ProjectOverviewGrid({
                       className="orchestrator-btn flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold hover:no-underline"
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] opacity-80" />
-                      orchestrator
+                      {t("projects.orchestratorLink")}
                     </Link>
                   ) : (
                     <button
@@ -988,8 +1030,8 @@ function ProjectOverviewGrid({
                       className="orchestrator-btn px-3 py-1.5 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-70"
                     >
                       {spawningProjectIds.includes(project.id)
-                        ? "Spawning..."
-                        : "Spawn Orchestrator"}
+                        ? t("dashboard.spawning")
+                        : t("dashboard.spawnOrchestrator")}
                     </button>
                   )}
                 </div>

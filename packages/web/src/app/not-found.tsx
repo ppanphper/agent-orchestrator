@@ -3,10 +3,10 @@ import { ErrorDisplay } from "@/components/ErrorDisplay";
 export default function NotFound() {
   return (
     <ErrorDisplay
-      title="Page not found"
-      message="This route does not exist in the dashboard. Return to the main view to pick an active project or session."
+      title="页面不存在"
+      message="控制台中没有这个路由。请返回主视图选择一个活跃项目或会话。"
       tone="not-found"
-      primaryAction={{ label: "Back to dashboard", href: "/" }}
+      primaryAction={{ label: "返回控制台", href: "/" }}
     />
   );
 }

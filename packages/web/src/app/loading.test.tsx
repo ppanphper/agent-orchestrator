@@ -5,7 +5,7 @@ import Loading from "./loading";
 describe("Loading (global)", () => {
   it("renders the loading text", () => {
     render(<Loading />);
-    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.getByText("加载中...")).toBeInTheDocument();
   });
 
   it("renders a spinning indicator", () => {

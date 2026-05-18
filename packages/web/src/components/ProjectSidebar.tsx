@@ -13,6 +13,7 @@ import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { ThemeToggle } from "./ThemeToggle";
 import { AddProjectModal } from "./AddProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
+import { useI18n } from "@/lib/i18n";
 
 /** Minimal shape needed to render an orchestrator link in the sidebar. */
 export interface ProjectSidebarOrchestrator {
@@ -105,7 +106,6 @@ function loadExpandedProjects(): Set<string> | null {
   }
 }
 
-
 export function ProjectSidebar(props: ProjectSidebarProps) {
   if (props.projects.length === 0) {
     return <ProjectSidebarEmpty collapsed={props.collapsed} />;
@@ -132,6 +132,7 @@ const SessionRow = memo(function SessionRow({
   onNavigate,
   onStartRename,
 }: SessionRowProps) {
+  const { t } = useI18n();
   const effectiveDisplayName =
     pendingRename !== undefined
       ? pendingRename
@@ -160,7 +161,7 @@ const SessionRow = memo(function SessionRow({
         }}
         className="project-sidebar__sess-link flex flex-1 min-w-0 items-center gap-[7px]"
         aria-current={isActive ? "page" : undefined}
-        aria-label={`Open ${title}`}
+        aria-label={t("projects.openSession", { title })}
       >
         <SessionDot level={level} />
         <div className="flex-1 min-w-0">
@@ -187,8 +188,8 @@ const SessionRow = memo(function SessionRow({
           onStartRename(session, title);
         }}
         className="project-sidebar__sess-rename-btn opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100"
-        title="Rename session"
-        aria-label={`Rename ${session.id}`}
+        title={t("projects.renameSession")}
+        aria-label={t("projects.renameId", { id: session.id })}
       >
         <svg
           width="11"
@@ -210,6 +211,7 @@ const SessionRow = memo(function SessionRow({
 });
 
 function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
+  const { t } = useI18n();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
 
   if (collapsed) {
@@ -218,7 +220,7 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
         <button
           type="button"
           className="project-sidebar__add-btn"
-          aria-label="New project"
+          aria-label={t("projects.newProject")}
           onClick={() => setAddProjectOpen(true)}
         >
           <svg
@@ -239,11 +241,11 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <aside className="project-sidebar flex h-full flex-col">
       <div className="project-sidebar__compact-hdr">
-        <span className="project-sidebar__sect-label">Projects</span>
+        <span className="project-sidebar__sect-label">{t("projects.heading")}</span>
         <button
           type="button"
           className="project-sidebar__add-btn"
-          aria-label="New project"
+          aria-label={t("projects.newProject")}
           onClick={() => setAddProjectOpen(true)}
         >
           <svg
@@ -258,7 +260,7 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
         </button>
       </div>
       <div className="project-sidebar__empty flex-1 text-[var(--color-text-tertiary)]">
-        No projects yet. Click + to add one.
+        {t("projects.noneYet")}
       </div>
       <div className="project-sidebar__footer">
         <div className="flex items-center justify-end gap-1 border-t border-[var(--color-border-subtle)] px-2 py-2">
@@ -283,6 +285,7 @@ function ProjectSidebarInner({
   onToggleCollapsed: _onToggleCollapsed,
   onMobileClose,
 }: ProjectSidebarProps) {
+  const { t } = useI18n();
   const router = useRouter();
   const _isLoading = loading || sessions === null;
 
@@ -462,7 +465,6 @@ function ProjectSidebarInner({
     return map;
   }, [sessionsKey, prefixByProject, allPrefixes, visibleProjects, showKilled, showDone]);
 
-
   // Clear an optimistic rename once the prop session.displayName catches up.
   // Without this, we'd keep masking the server value forever after a save.
   useEffect(() => {
@@ -482,20 +484,17 @@ function ProjectSidebarInner({
   const pendingRenamesRef = useRef(pendingRenames);
   pendingRenamesRef.current = pendingRenames;
 
-  const startRename = useCallback(
-    (session: DashboardSession, currentTitle: string) => {
-      // Prefer the in-flight optimistic value over the prop — if the user opens
-      // rename while a previous PATCH is still propagating, the prop still shows
-      // the pre-rename value but we want the input to start from the latest.
-      // Auto-derived displayName isn't pre-filled (user-set flag absent) — start
-      // from the live title so the user types over the visible label.
-      const pending = pendingRenamesRef.current.get(session.id);
-      const initial = pending ?? (session.displayNameUserSet ? (session.displayName ?? "") : "");
-      setEditingSessionId(session.id);
-      setEditingValue(initial || currentTitle);
-    },
-    [],
-  );
+  const startRename = useCallback((session: DashboardSession, currentTitle: string) => {
+    // Prefer the in-flight optimistic value over the prop — if the user opens
+    // rename while a previous PATCH is still propagating, the prop still shows
+    // the pre-rename value but we want the input to start from the latest.
+    // Auto-derived displayName isn't pre-filled (user-set flag absent) — start
+    // from the live title so the user types over the visible label.
+    const pending = pendingRenamesRef.current.get(session.id);
+    const initial = pending ?? (session.displayNameUserSet ? (session.displayName ?? "") : "");
+    setEditingSessionId(session.id);
+    setEditingValue(initial || currentTitle);
+  }, []);
 
   const cancelRename = () => {
     setEditingSessionId(null);
@@ -566,9 +565,7 @@ function ProjectSidebarInner({
   };
 
   const handleRemoveProject = async (project: ProjectInfo) => {
-    const confirmed = window.confirm(
-      `Remove project ${project.name} from AO? This clears its AO sessions/history and removes it from the portfolio, but keeps the repository folder on disk.`,
-    );
+    const confirmed = window.confirm(t("projects.removeConfirm", { name: project.name }));
     if (!confirmed) return;
 
     setDeletingProjectId(project.id);
@@ -950,7 +947,9 @@ function ProjectSidebarInner({
                         onClick={() => void handleRemoveProject(project)}
                         disabled={deletingProjectId === project.id}
                       >
-                        {deletingProjectId === project.id ? "Removing..." : "Remove project"}
+                        {deletingProjectId === project.id
+                          ? t("projects.removing")
+                          : t("projects.removeProject")}
                       </button>
                     </div>
                   ) : null}
@@ -1041,9 +1040,7 @@ function ProjectSidebarInner({
                       </button>
                     </div>
                   ) : (
-                    <div className="project-sidebar__empty">
-                      No active sessions
-                    </div>
+                    <div className="project-sidebar__empty">No active sessions</div>
                   )}
                 </div>
               )}

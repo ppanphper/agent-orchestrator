@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
       template: `%s | ${projectName}`,
       default: `ao | ${projectName}`,
     },
-    description: "Dashboard for managing parallel AI coding agents",
+    description: "用于管理并行 AI 编码 Agent 的控制台",
     appleWebApp: {
       capable: true,
       statusBarStyle: "black-translucent",
@@ -33,7 +33,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="zh-CN" className="dark" suppressHydrationWarning>
       <body className="h-screen overflow-hidden bg-[var(--color-bg-base)] text-[var(--color-text-primary)] antialiased">
         <Providers>{children}</Providers>
         <ServiceWorkerRegistrar />

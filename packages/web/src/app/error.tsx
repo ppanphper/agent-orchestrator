@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { useI18n } from "@/lib/i18n";
 
 export default function Error({
   error,
@@ -12,6 +13,7 @@ export default function Error({
   reset: () => void;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
 
   useEffect(() => {
     console.error(error);
@@ -19,17 +21,17 @@ export default function Error({
 
   return (
     <ErrorDisplay
-      title="Something went wrong"
-      message="The dashboard hit an unexpected error. Try reloading the route data or head back to the main dashboard."
+      title={t("errors.routeTitle")}
+      message={t("errors.routeMessage")}
       tone="warning"
       primaryAction={{
-        label: "Try again",
+        label: t("common.retry"),
         onClick: () => {
           reset();
           router.refresh();
         },
       }}
-      secondaryAction={{ label: "Back to dashboard", href: "/" }}
+      secondaryAction={{ label: t("common.backToDashboard"), href: "/" }}
       error={error}
       compact
       chrome="card"
