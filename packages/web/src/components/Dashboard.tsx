@@ -28,6 +28,7 @@ import { CopyDebugBundleButton } from "./CopyDebugBundleButton";
 import { SidebarContext } from "./workspace/SidebarContext";
 import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { BottomSheet } from "./BottomSheet";
+import { BacklogPanel } from "./BacklogPanel";
 
 interface DashboardProps {
   initialSessions: DashboardSession[];
@@ -663,6 +664,7 @@ function DashboardInner({
 
               <div className="dashboard-main__body">
                 {loadErrorBanner}
+                {!allProjectsView && projectId ? <BacklogPanel projectId={projectId} /> : null}
                 {anyRateLimited && !rateLimitDismissed && (
                   <div className="dashboard-alert mb-4 flex items-center gap-2.5 border border-[color-mix(in_srgb,var(--color-status-attention)_25%,transparent)] bg-[var(--color-tint-yellow)] px-3.5 py-2.5 text-[11px] text-[var(--color-status-attention)]">
                     <svg
