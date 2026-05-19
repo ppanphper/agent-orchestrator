@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface BacklogIssue {
   projectId: string;
@@ -30,6 +31,7 @@ interface BacklogPanelProps {
 }
 
 export function BacklogPanel({ projectId }: BacklogPanelProps) {
+  const { t } = useI18n();
   const [issues, setIssues] = useState<BacklogIssue[]>([]);
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
@@ -54,18 +56,18 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
       const response = await fetch("/api/backlog", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as BacklogResponse | null;
       if (!response.ok) {
-        throw new Error(data?.error ?? `Backlog request failed with ${response.status}`);
+        throw new Error(data?.error ?? t("backlog.requestFailed", { status: response.status }));
       }
       setIssues(data?.issues ?? []);
       setPollerPaused(data?.poller?.paused === true);
       setMaxConcurrent(data?.poller?.maxConcurrent ?? 5);
       setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load backlog");
+      setError(err instanceof Error ? err.message : t("backlog.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const setPoller = useCallback(
     async (action: "start" | "stop") => {
@@ -79,12 +81,14 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         });
         const data = (await response.json().catch(() => null)) as BacklogResponse | null;
         if (!response.ok) {
-          throw new Error(data?.error ?? `Backlog ${action} failed with ${response.status}`);
+          throw new Error(
+            data?.error ?? t("backlog.actionFailed", { action, status: response.status }),
+          );
         }
         setPollerPaused(data?.poller?.paused === true);
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : `Failed to ${action} backlog poller`);
+        setError(err instanceof Error ? err.message : t("backlog.pollerActionFailed", { action }));
       } finally {
         setLoading(false);
       }
@@ -103,42 +107,47 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
       });
       const data = (await response.json().catch(() => null)) as BacklogResponse | null;
       if (!response.ok) {
-        throw new Error(data?.error ?? `Claim failed with ${response.status}`);
+        throw new Error(data?.error ?? t("backlog.claimFailed", { status: response.status }));
       }
       setIssues(data?.issues ?? []);
       setPollerPaused(data?.poller?.paused === true);
       setMaxConcurrent(data?.poller?.maxConcurrent ?? maxConcurrent);
       setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to claim backlog issue");
+      setError(err instanceof Error ? err.message : t("backlog.claimIssueFailed"));
     } finally {
       setClaiming(false);
     }
-  }, [maxConcurrent]);
+  }, [maxConcurrent, t]);
 
-  const saveMaxConcurrent = useCallback(async (nextMaxConcurrent: number) => {
-    const normalized = Math.max(1, Math.min(50, Math.trunc(nextMaxConcurrent)));
-    setMaxConcurrent(normalized);
-    setSavingMaxConcurrent(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/backlog", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set-max-concurrent", maxConcurrent: normalized }),
-      });
-      const data = (await response.json().catch(() => null)) as BacklogResponse | null;
-      if (!response.ok) {
-        throw new Error(data?.error ?? `Concurrency update failed with ${response.status}`);
+  const saveMaxConcurrent = useCallback(
+    async (nextMaxConcurrent: number) => {
+      const normalized = Math.max(1, Math.min(50, Math.trunc(nextMaxConcurrent)));
+      setMaxConcurrent(normalized);
+      setSavingMaxConcurrent(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/backlog", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "set-max-concurrent", maxConcurrent: normalized }),
+        });
+        const data = (await response.json().catch(() => null)) as BacklogResponse | null;
+        if (!response.ok) {
+          throw new Error(
+            data?.error ?? t("backlog.concurrencyUpdateFailed", { status: response.status }),
+          );
+        }
+        setPollerPaused(data?.poller?.paused === true);
+        setMaxConcurrent(data?.poller?.maxConcurrent ?? normalized);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t("backlog.updateConcurrencyFailed"));
+      } finally {
+        setSavingMaxConcurrent(false);
       }
-      setPollerPaused(data?.poller?.paused === true);
-      setMaxConcurrent(data?.poller?.maxConcurrent ?? normalized);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update concurrency limit");
-    } finally {
-      setSavingMaxConcurrent(false);
-    }
-  }, []);
+    },
+    [t],
+  );
 
   useEffect(() => {
     void refresh();
@@ -152,18 +161,22 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
       const response = await fetch("/api/setup-labels", { method: "POST" });
       const data = (await response.json().catch(() => null)) as LabelSetupResponse | null;
       if (!response.ok && response.status !== 207) {
-        throw new Error(data?.error ?? `Label setup failed with ${response.status}`);
+        throw new Error(
+          data?.error ?? t("backlog.labelSetupFailedWith", { status: response.status }),
+        );
       }
 
       const results = data?.results ?? [];
       const failed = results.filter((result) => result.status === "failed").length;
-      setSetupSummary(failed > 0 ? `${failed} label update failed` : "Labels ready");
+      setSetupSummary(
+        failed > 0 ? t("backlog.labelUpdateFailed", { count: failed }) : t("backlog.labelsReady"),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to setup labels");
+      setError(err instanceof Error ? err.message : t("backlog.labelSetupFailed"));
     } finally {
       setSetupLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const spawnIssue = useCallback(
     async (issueId: string) => {
@@ -177,16 +190,16 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         });
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
         if (!response.ok) {
-          throw new Error(data?.error ?? `Spawn failed with ${response.status}`);
+          throw new Error(data?.error ?? t("backlog.spawnFailed", { status: response.status }));
         }
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : `Failed to start #${issueId}`);
+        setError(err instanceof Error ? err.message : t("backlog.startFailed", { id: issueId }));
       } finally {
         setSpawningIssueId(null);
       }
     },
-    [projectId, refresh],
+    [projectId, refresh, t],
   );
 
   return (
@@ -195,22 +208,24 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="inline-flex h-2 w-2 rounded-full bg-[var(--color-status-success)]" />
-            <h2 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Backlog</h2>
+            <h2 className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+              {t("backlog.title")}
+            </h2>
             <span className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
               {projectIssues.length}
             </span>
           </div>
           <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
             {pollerPaused
-              ? "Paused"
+              ? t("backlog.paused")
               : lastRefreshedAt
-                ? `Last refresh ${lastRefreshedAt}`
-                : "Ready"}
+                ? t("backlog.lastRefresh", { time: lastRefreshedAt })
+                : t("backlog.ready")}
           </p>
         </div>
 
         <label className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
-          Max
+          {t("backlog.max")}
           <input
             type="number"
             min={1}
@@ -219,7 +234,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
             onChange={(event) => void saveMaxConcurrent(Number(event.target.value))}
             disabled={savingMaxConcurrent}
             className="h-7 w-14 rounded-[6px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-2 text-[11px] text-[var(--color-text-primary)]"
-            aria-label="Max concurrent backlog agents"
+            aria-label={t("backlog.maxConcurrentAgents")}
           />
         </label>
 
@@ -228,7 +243,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           className="dashboard-app-btn"
           onClick={() => void refresh()}
           disabled={loading}
-          aria-label="Refresh backlog"
+          aria-label={t("backlog.refreshLabel")}
         >
           <svg
             width="12"
@@ -244,14 +259,14 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
             <path d="M3 12A9 9 0 0 1 18.4 5.6L21 8" />
             <path d="M21 3v5h-5" />
           </svg>
-          {loading ? "Refreshing" : "Refresh"}
+          {loading ? t("backlog.refreshing") : t("backlog.refresh")}
         </button>
         <button
           type="button"
           className="dashboard-app-btn dashboard-app-btn--amber"
           onClick={() => void claimNow()}
           disabled={claiming}
-          aria-label="Claim backlog issue now"
+          aria-label={t("backlog.claimNowLabel")}
         >
           <svg
             width="12"
@@ -264,7 +279,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           >
             <path d="m5 12 14-7-7 14-2-7-5-0Z" />
           </svg>
-          {claiming ? "Claiming" : "Claim Now"}
+          {claiming ? t("backlog.claiming") : t("backlog.claimNow")}
         </button>
         <button
           type="button"
@@ -273,7 +288,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           }
           onClick={() => void setPoller(pollerPaused ? "start" : "stop")}
           disabled={loading}
-          aria-label={pollerPaused ? "Start backlog poller" : "Stop backlog poller"}
+          aria-label={pollerPaused ? t("backlog.startPoller") : t("backlog.stopPoller")}
         >
           <svg
             width="12"
@@ -286,14 +301,14 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           >
             {pollerPaused ? <path d="m8 5 11 7-11 7V5Z" /> : <path d="M8 5v14M16 5v14" />}
           </svg>
-          {pollerPaused ? "Start" : "Stop"}
+          {pollerPaused ? t("backlog.start") : t("backlog.stop")}
         </button>
         <button
           type="button"
           className="dashboard-app-btn"
           onClick={() => void setupLabels()}
           disabled={setupLoading}
-          aria-label="Setup backlog labels"
+          aria-label={t("backlog.setupLabels")}
         >
           <svg
             width="12"
@@ -306,7 +321,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           >
             <path d="M20 7 9 18l-5-5" />
           </svg>
-          {setupLoading ? "Setting" : "Labels"}
+          {setupLoading ? t("backlog.setting") : t("backlog.labels")}
         </button>
       </div>
 
@@ -340,7 +355,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
                 className="dashboard-app-btn dashboard-app-btn--amber"
                 onClick={() => void spawnIssue(issue.id)}
                 disabled={spawningIssueId === issue.id}
-                aria-label={`Start agent for issue ${issue.id}`}
+                aria-label={t("backlog.startIssueLabel", { id: issue.id })}
               >
                 <svg
                   width="12"
@@ -353,7 +368,9 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
                 >
                   <path d="m5 12 14-7-7 14-2-7-5-0Z" />
                 </svg>
-                {spawningIssueId === issue.id ? "Starting" : "Start"}
+                {spawningIssueId === issue.id
+                  ? t("backlog.startingIssue")
+                  : t("backlog.startIssue")}
               </button>
             </div>
           ))}

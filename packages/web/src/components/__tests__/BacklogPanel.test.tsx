@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@/lib/i18n";
 import { BacklogPanel } from "../BacklogPanel";
 
 const fetchMock = vi.fn();
@@ -170,5 +171,26 @@ describe("BacklogPanel", () => {
         body: JSON.stringify({ action: "set-max-concurrent", maxConcurrent: 3 }),
       });
     });
+  });
+
+  it("renders backlog controls in Chinese locale", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        issues: [],
+        poller: { running: true, paused: false, maxConcurrent: 5 },
+      }),
+    } as Response);
+
+    render(
+      <I18nProvider locale="zh-CN">
+        <BacklogPanel projectId="app" />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "待办" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新待办" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "立即认领待办议题" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "待办 Agent 最大并发数" })).toBeInTheDocument();
   });
 });
