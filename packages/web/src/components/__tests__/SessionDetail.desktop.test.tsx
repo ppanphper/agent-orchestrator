@@ -223,6 +223,32 @@ describe("SessionDetail desktop layout", () => {
       "/projects/my-app",
     );
     expect(screen.queryByTestId("direct-terminal")).not.toBeInTheDocument();
+    // The ended-session body also exposes a prominent "Restore session" button
+    // so users don't have to find the small icon in the header.
+    expect(
+      within(screen.getByRole("region", { name: "Session ended summary" })).getByRole("button", {
+        name: "Restore session",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the Restore button in the ended-summary for pr_merged sessions (status=cleanup)", () => {
+    render(
+      <SessionDetail
+        session={makeSession({
+          id: "worker-pr-merged",
+          projectId: "my-app",
+          status: "cleanup",
+          activity: "exited",
+          pr: makePR({ number: 1904, state: "merged" }),
+        })}
+      />,
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Session ended summary" })).getByRole("button", {
+        name: "Restore session",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("keeps restored working sessions live when terminatedAt is stale", () => {
@@ -269,6 +295,60 @@ describe("SessionDetail desktop layout", () => {
     expect(screen.getByTestId("direct-terminal")).toHaveTextContent(
       "worker-restored-stale-terminal-marker",
     );
+  });
+
+  it("does not open a blank terminal when activity exited but lifecycle still reports alive", () => {
+    render(
+      <SessionDetail
+        session={makeSession({
+          id: "worker-review-ended",
+          projectId: "my-app",
+          status: "review_pending",
+          activity: "exited",
+          summary: "Worker exited after opening a PR",
+          pr: null,
+          lifecycle: {
+            sessionState: "idle",
+            sessionReason: "awaiting_external_review",
+            prState: "open",
+            prReason: "review_pending",
+            runtimeState: "alive",
+            runtimeReason: "process_running",
+            session: {
+              state: "idle",
+              reason: "awaiting_external_review",
+              label: "idle",
+              reasonLabel: "awaiting external review",
+            },
+            pr: {
+              state: "open",
+              reason: "review_pending",
+              label: "open",
+              reasonLabel: "review pending",
+            },
+            runtime: {
+              state: "alive",
+              reason: "process_running",
+              label: "alive",
+              reasonLabel: "process running",
+            },
+            legacyStatus: "review_pending",
+            evidence: null,
+            detectingAttempts: 0,
+            detectingEscalatedAt: null,
+            summary: "Waiting for external review",
+            guidance: null,
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Session ended summary" })).toBeInTheDocument();
+    expect(screen.getByText("Terminal ended")).toBeInTheDocument();
+    expect(screen.queryByTestId("direct-terminal")).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner")).getByRole("button", { name: "Restore" }),
+    ).toBeInTheDocument();
   });
 
   it("shows restore for restorable orchestrator sessions", () => {

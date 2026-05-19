@@ -239,6 +239,8 @@ export function SessionDetail({
               headline={headline}
               pr={pr}
               dashboardHref={dashboardHref}
+              isRestorable={isRestorable}
+              onRestore={handleRestore}
             />
           ) : (
             <DirectTerminal
