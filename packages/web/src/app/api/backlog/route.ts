@@ -13,10 +13,11 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/backlog — List backlog issues (labeled agent:backlog)
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const projectId = request.nextUrl.searchParams.get("projectId") ?? undefined;
   try {
     const issues = await getBacklogIssues();
-    return NextResponse.json({ issues, poller: getBacklogPollerStatus() });
+    return NextResponse.json({ issues, poller: getBacklogPollerStatus(projectId) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to fetch backlog" },
@@ -27,31 +28,33 @@ export async function GET() {
 
 /**
  * POST /api/backlog — Control the backlog poller.
- * Body: { action: "start" | "stop" | "status" | "claim-now" | "set-max-concurrent" }
+ * Body: { action: "start" | "stop" | "status" | "claim-now" | "set-max-concurrent", projectId?: string }
  */
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as {
     action?: string;
     maxConcurrent?: number;
+    projectId?: string;
   };
   const action = body.action ?? "status";
+  const projectId = typeof body.projectId === "string" ? body.projectId : undefined;
 
   if (action === "stop") {
-    return NextResponse.json({ poller: stopBacklogPoller() });
+    return NextResponse.json({ poller: stopBacklogPoller(projectId) });
   }
 
   if (action === "start") {
-    return NextResponse.json({ poller: resumeBacklogPoller() });
+    return NextResponse.json({ poller: resumeBacklogPoller(projectId) });
   }
 
   if (action === "status") {
-    return NextResponse.json({ poller: getBacklogPollerStatus() });
+    return NextResponse.json({ poller: getBacklogPollerStatus(projectId) });
   }
 
   if (action === "claim-now") {
-    await claimBacklogNow();
+    await claimBacklogNow(projectId);
     const issues = await getBacklogIssues();
-    return NextResponse.json({ issues, poller: getBacklogPollerStatus() });
+    return NextResponse.json({ issues, poller: getBacklogPollerStatus(projectId) });
   }
 
   if (action === "set-max-concurrent") {
@@ -66,7 +69,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    return NextResponse.json({ poller: setBacklogMaxConcurrent(body.maxConcurrent) });
+    return NextResponse.json({
+      poller: setBacklogMaxConcurrent(body.maxConcurrent, projectId),
+    });
   }
 
   return NextResponse.json({ error: `Unsupported backlog action: ${action}` }, { status: 400 });

@@ -170,6 +170,13 @@ interface BacklogPollerState {
   paused: boolean;
   maxConcurrent?: number;
   updatedAt?: string;
+  projects?: Record<string, ProjectBacklogPollerState>;
+}
+
+interface ProjectBacklogPollerState {
+  paused?: boolean;
+  maxConcurrent?: number;
+  updatedAt?: string;
 }
 
 export interface BacklogPollerStatus {
@@ -193,10 +200,22 @@ function readBacklogPollerState(): BacklogPollerState {
     if (!existsSync(statePath))
       return { paused: false, maxConcurrent: DEFAULT_MAX_CONCURRENT_AGENTS };
     const raw = JSON.parse(readFileSync(statePath, "utf8")) as Partial<BacklogPollerState>;
+    const projects: Record<string, ProjectBacklogPollerState> = {};
+    if (raw.projects && typeof raw.projects === "object") {
+      for (const [projectId, projectState] of Object.entries(raw.projects)) {
+        if (!projectState || typeof projectState !== "object") continue;
+        projects[projectId] = {
+          paused: projectState.paused === true,
+          maxConcurrent: normalizeMaxConcurrent(projectState.maxConcurrent),
+          updatedAt: projectState.updatedAt,
+        };
+      }
+    }
     return {
       paused: raw.paused === true,
       maxConcurrent: normalizeMaxConcurrent(raw.maxConcurrent),
       updatedAt: raw.updatedAt,
+      projects,
     };
   } catch {
     return { paused: false, maxConcurrent: DEFAULT_MAX_CONCURRENT_AGENTS };
@@ -219,40 +238,94 @@ function updateBacklogPollerState(patch: Partial<BacklogPollerState>): BacklogPo
   return readBacklogPollerState();
 }
 
+function getProjectBacklogPollerState(
+  state: BacklogPollerState,
+  projectId: string,
+): Required<Pick<ProjectBacklogPollerState, "paused" | "maxConcurrent">> {
+  const projectState = state.projects?.[projectId];
+  const projectMode = Object.keys(state.projects ?? {}).length > 0;
+  return {
+    paused: projectState?.paused ?? (projectMode ? true : state.paused),
+    maxConcurrent:
+      projectState?.maxConcurrent ?? state.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_AGENTS,
+  };
+}
+
+function updateProjectBacklogPollerState(
+  projectId: string,
+  patch: Partial<ProjectBacklogPollerState>,
+): BacklogPollerState {
+  const state = readBacklogPollerState();
+  const previousProject = state.projects?.[projectId];
+  const nextProject = {
+    ...previousProject,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  const next = {
+    ...state,
+    projects: {
+      ...(state.projects ?? {}),
+      [projectId]: nextProject,
+    },
+  };
+  writeBacklogPollerState(next);
+  return readBacklogPollerState();
+}
+
 function normalizeMaxConcurrent(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value)) return DEFAULT_MAX_CONCURRENT_AGENTS;
   return Math.max(1, Math.min(value, 50));
 }
 
 /** Return current backlog poller state. */
-export function getBacklogPollerStatus(): BacklogPollerStatus {
+export function getBacklogPollerStatus(projectId?: string): BacklogPollerStatus {
   const state = readBacklogPollerState();
+  const effectiveState = projectId ? getProjectBacklogPollerState(state, projectId) : state;
   return {
     running: globalForBacklog._aoBacklogStarted === true,
-    paused: state.paused,
-    maxConcurrent: state.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_AGENTS,
+    paused: effectiveState.paused,
+    maxConcurrent: effectiveState.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_AGENTS,
   };
 }
 
 /** Update the global backlog concurrency cap used by automatic and manual claiming. */
-export function setBacklogMaxConcurrent(maxConcurrent: number): BacklogPollerStatus {
+export function setBacklogMaxConcurrent(
+  maxConcurrent: number,
+  projectId?: string,
+): BacklogPollerStatus {
+  if (projectId) {
+    updateProjectBacklogPollerState(projectId, {
+      maxConcurrent: normalizeMaxConcurrent(maxConcurrent),
+    });
+    return getBacklogPollerStatus(projectId);
+  }
   updateBacklogPollerState({ maxConcurrent: normalizeMaxConcurrent(maxConcurrent) });
   return getBacklogPollerStatus();
 }
 
 /** Start the backlog auto-claim loop. Idempotent — safe to call multiple times. */
-export function startBacklogPoller(): void {
-  if (readBacklogPollerState().paused) return;
+export function startBacklogPoller(projectId?: string): void {
+  const state = readBacklogPollerState();
+  if (projectId) {
+    updateProjectBacklogPollerState(projectId, { paused: false });
+  } else if (state.paused) {
+    return;
+  }
   if (globalForBacklog._aoBacklogStarted) return;
   globalForBacklog._aoBacklogStarted = true;
 
   // Run immediately, then on interval
-  void pollBacklog();
+  void (projectId ? runBacklogClaimCycle(projectId) : pollBacklog());
   globalForBacklog._aoBacklogTimer = setInterval(() => void pollBacklog(), BACKLOG_POLL_INTERVAL);
 }
 
 /** Pause auto-claiming and clear the polling interval. */
-export function stopBacklogPoller(): BacklogPollerStatus {
+export function stopBacklogPoller(projectId?: string): BacklogPollerStatus {
+  if (projectId) {
+    updateProjectBacklogPollerState(projectId, { paused: true });
+    return getBacklogPollerStatus(projectId);
+  }
   if (globalForBacklog._aoBacklogTimer) {
     clearInterval(globalForBacklog._aoBacklogTimer);
     globalForBacklog._aoBacklogTimer = undefined;
@@ -263,7 +336,12 @@ export function stopBacklogPoller(): BacklogPollerStatus {
 }
 
 /** Resume auto-claiming and start the polling interval. */
-export function resumeBacklogPoller(): BacklogPollerStatus {
+export function resumeBacklogPoller(projectId?: string): BacklogPollerStatus {
+  if (projectId) {
+    updateProjectBacklogPollerState(projectId, { paused: false });
+    startBacklogPoller(projectId);
+    return getBacklogPollerStatus(projectId);
+  }
   updateBacklogPollerState({ paused: false });
   startBacklogPoller();
   return getBacklogPollerStatus();
@@ -288,11 +366,13 @@ async function labelIssuesForVerification(
   sessions: Session[],
   config: LoadedConfig,
   registry: PluginRegistry,
+  projectFilter: Set<string> | null = null,
 ): Promise<void> {
   const mergedSessions = sessions.filter(
     (s) =>
       s.lifecycle.pr.state === "merged" &&
       s.issueId &&
+      (!projectFilter || projectFilter.has(s.projectId)) &&
       !processedIssues.has(`${s.projectId}:${s.issueId}`),
   );
 
@@ -340,8 +420,10 @@ async function labelIssuesForVerification(
 async function relabelReopenedIssues(
   config: LoadedConfig,
   registry: PluginRegistry,
+  projectFilter: Set<string> | null = null,
 ): Promise<void> {
-  for (const [, project] of Object.entries(config.projects)) {
+  for (const [projectId, project] of Object.entries(config.projects)) {
+    if (projectFilter && !projectFilter.has(projectId)) continue;
     if (!project.tracker?.plugin) continue;
     const tracker = registry.get<Tracker>("tracker", project.tracker.plugin);
     if (!tracker?.listIssues || !tracker.updateIssue) continue;
@@ -376,43 +458,50 @@ async function relabelReopenedIssues(
 }
 
 export function pollBacklog(): Promise<void> {
-  if (readBacklogPollerState().paused) {
-    return Promise.resolve();
-  }
-  return runBacklogClaimCycle();
+  return runBacklogClaimCycle(undefined, false);
 }
 
 /** Run one manual backlog claim cycle even when automatic polling is paused. */
-export function claimBacklogNow(): Promise<void> {
-  return runBacklogClaimCycle();
+export function claimBacklogNow(projectId?: string): Promise<void> {
+  return runBacklogClaimCycle(projectId, true);
 }
 
-function runBacklogClaimCycle(): Promise<void> {
+function runBacklogClaimCycle(projectId?: string, ignorePaused = false): Promise<void> {
   if (globalForBacklog._aoBacklogPollInFlight) {
     return globalForBacklog._aoBacklogPollInFlight;
   }
 
-  const pollPromise = pollBacklogOnce().finally(() => {
-    if (globalForBacklog._aoBacklogPollInFlight === pollPromise) {
-      globalForBacklog._aoBacklogPollInFlight = undefined;
-    }
-  });
+  const pollPromise = pollBacklogOnce(projectId ? [projectId] : undefined, ignorePaused).finally(
+    () => {
+      if (globalForBacklog._aoBacklogPollInFlight === pollPromise) {
+        globalForBacklog._aoBacklogPollInFlight = undefined;
+      }
+    },
+  );
 
   globalForBacklog._aoBacklogPollInFlight = pollPromise;
   return pollPromise;
 }
 
-async function pollBacklogOnce(): Promise<void> {
+async function pollBacklogOnce(projectIds?: string[], ignorePaused = false): Promise<void> {
   try {
     const { config, registry, sessionManager } = await getServices();
+    const projectFilter = projectIds ? new Set(projectIds) : null;
+    const state = readBacklogPollerState();
+    const activeProjectIds = Object.keys(config.projects).filter((projectId) => {
+      if (projectFilter && !projectFilter.has(projectId)) return false;
+      return ignorePaused || !getProjectBacklogPollerState(state, projectId).paused;
+    });
+    if (activeProjectIds.length === 0) return;
+    const activeProjectFilter = new Set(activeProjectIds);
 
     // Get all sessions
     const allSessions = await sessionManager.list();
     // Label issues for verification when PRs are merged
-    await labelIssuesForVerification(allSessions, config, registry);
+    await labelIssuesForVerification(allSessions, config, registry, activeProjectFilter);
 
     // Detect reopened issues: open state + agent:done label → relabel as agent:backlog
-    await relabelReopenedIssues(config, registry);
+    await relabelReopenedIssues(config, registry, activeProjectFilter);
 
     const allSessionPrefixes = Object.entries(config.projects).map(
       ([id, p]) => p.sessionPrefix ?? id,
@@ -435,13 +524,16 @@ async function pollBacklogOnce(): Promise<void> {
     const claimingIssueIds = getBacklogClaimingIssues();
 
     // Auto-scaling: respect max concurrent agents
-    const maxConcurrent = getBacklogPollerStatus().maxConcurrent;
-    let availableSlots = maxConcurrent - workerSessions.length;
-    if (availableSlots <= 0) return; // At capacity
-
     for (const [projectId, project] of Object.entries(config.projects)) {
-      if (availableSlots <= 0) break;
+      if (!activeProjectFilter.has(projectId)) continue;
+      const projectPollerState = getProjectBacklogPollerState(state, projectId);
       if (!project.tracker?.plugin) continue;
+
+      const activeProjectWorkerCount = workerSessions.filter(
+        (session) => session.projectId === projectId,
+      ).length;
+      let availableSlots = projectPollerState.maxConcurrent - activeProjectWorkerCount;
+      if (availableSlots <= 0) continue; // Project is at capacity
 
       const tracker = registry.get<Tracker>("tracker", project.tracker.plugin);
       if (!tracker?.listIssues) continue;

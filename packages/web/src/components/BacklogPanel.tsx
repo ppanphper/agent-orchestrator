@@ -53,7 +53,9 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/backlog", { cache: "no-store" });
+      const response = await fetch(`/api/backlog?projectId=${encodeURIComponent(projectId)}`, {
+        cache: "no-store",
+      });
       const data = (await response.json().catch(() => null)) as BacklogResponse | null;
       if (!response.ok) {
         throw new Error(data?.error ?? t("backlog.requestFailed", { status: response.status }));
@@ -67,7 +69,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [projectId, t]);
 
   const setPoller = useCallback(
     async (action: "start" | "stop") => {
@@ -77,7 +79,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         const response = await fetch("/api/backlog", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action }),
+          body: JSON.stringify({ action, projectId }),
         });
         const data = (await response.json().catch(() => null)) as BacklogResponse | null;
         if (!response.ok) {
@@ -103,7 +105,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
       const response = await fetch("/api/backlog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "claim-now" }),
+        body: JSON.stringify({ action: "claim-now", projectId }),
       });
       const data = (await response.json().catch(() => null)) as BacklogResponse | null;
       if (!response.ok) {
@@ -130,7 +132,11 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         const response = await fetch("/api/backlog", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "set-max-concurrent", maxConcurrent: normalized }),
+          body: JSON.stringify({
+            action: "set-max-concurrent",
+            maxConcurrent: normalized,
+            projectId,
+          }),
         });
         const data = (await response.json().catch(() => null)) as BacklogResponse | null;
         if (!response.ok) {
@@ -146,7 +152,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         setSavingMaxConcurrent(false);
       }
     },
-    [t],
+    [projectId, t],
   );
 
   useEffect(() => {

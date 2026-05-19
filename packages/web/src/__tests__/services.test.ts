@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const BACKLOG_STATE_PATH = "/tmp/backlog-poller.json";
@@ -348,6 +348,83 @@ describe("pollBacklog", () => {
       }),
       expect.objectContaining({ tracker: { plugin: "github" } }),
     );
+  });
+
+  it("only polls explicitly started projects in project-scoped backlog mode", async () => {
+    mockLoadConfig.mockReturnValue({
+      configPath: "/tmp/agent-orchestrator.yaml",
+      port: 3000,
+      readyThresholdMs: 300_000,
+      defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
+      projects: {
+        "test-project": {
+          path: "/tmp/test-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+        "other-project": {
+          path: "/tmp/other-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+      },
+      notifiers: {},
+      notificationRouting: { urgent: [], action: [], warning: [], info: [] },
+      reactions: {},
+    });
+    writeFileSync(
+      BACKLOG_STATE_PATH,
+      JSON.stringify({
+        paused: false,
+        maxConcurrent: 5,
+        projects: {
+          "test-project": { paused: false, maxConcurrent: 5 },
+        },
+      }),
+      "utf8",
+    );
+    mockListIssues.mockImplementation((_filters, project) =>
+      Promise.resolve([
+        {
+          id: project.path.includes("other-project") ? "999" : "123",
+          title: project.path.includes("other-project") ? "Other Issue" : "Test Issue",
+          description: "Test description",
+          url: `https://github.com/test/test/issues/${
+            project.path.includes("other-project") ? "999" : "123"
+          }`,
+          state: "open",
+          labels: ["agent:backlog"],
+        },
+      ]),
+    );
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { pollBacklog } = await import("../lib/services");
+    await pollBacklog();
+
+    expect(mockListIssues).toHaveBeenCalled();
+    expect(
+      mockListIssues.mock.calls.every(([, project]) => project.path === "/tmp/test-project"),
+    ).toBe(true);
+    expect(mockListIssues).toHaveBeenCalledWith(
+      { state: "open", labels: ["agent:backlog"], limit: 10 },
+      expect.objectContaining({ path: "/tmp/test-project" }),
+    );
+    expect(mockSpawn).toHaveBeenCalledWith({ projectId: "test-project", issueId: "123" });
+    expect(mockSpawn).not.toHaveBeenCalledWith({
+      projectId: "other-project",
+      issueId: "999",
+    });
   });
 
   it("respects the configured max concurrent backlog agents", async () => {

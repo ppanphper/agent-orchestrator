@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (body.addToBacklog) {
-      startBacklogPoller();
+      startBacklogPoller(projectId);
     }
 
     return NextResponse.json({ issue: { projectId, ...issue } }, { status: 201 });

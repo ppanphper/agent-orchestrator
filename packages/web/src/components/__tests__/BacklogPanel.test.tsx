@@ -41,7 +41,7 @@ describe("BacklogPanel", () => {
     render(<BacklogPanel projectId="app" />);
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/backlog", { cache: "no-store" }),
+      expect(fetchMock).toHaveBeenCalledWith("/api/backlog?projectId=app", { cache: "no-store" }),
     );
     expect(await screen.findByText("Fix upload progress")).toBeInTheDocument();
     expect(screen.queryByText("Other project")).not.toBeInTheDocument();
@@ -104,7 +104,7 @@ describe("BacklogPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/backlog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "stop" }),
+        body: JSON.stringify({ action: "stop", projectId: "app" }),
       });
     });
     expect(await screen.findByRole("button", { name: "Start backlog poller" })).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe("BacklogPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/backlog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "claim-now" }),
+        body: JSON.stringify({ action: "claim-now", projectId: "app" }),
       });
     });
   });
@@ -168,7 +168,11 @@ describe("BacklogPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/backlog", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set-max-concurrent", maxConcurrent: 3 }),
+        body: JSON.stringify({
+          action: "set-max-concurrent",
+          maxConcurrent: 3,
+          projectId: "app",
+        }),
       });
     });
   });
