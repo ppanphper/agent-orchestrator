@@ -3,12 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { CI_STATUS } from "@aoagents/ao-core/types";
 import { cn } from "@/lib/cn";
-import {
-  isPRMergeReady,
-  isPRRateLimited,
-  isPRUnenriched,
-  type DashboardPR,
-} from "@/lib/types";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
+import { isPRMergeReady, isPRRateLimited, isPRUnenriched, type DashboardPR } from "@/lib/types";
 import { buildGitHubCompareUrl } from "@/lib/github-links";
 import { PRCommentThread } from "./PRCommentThread";
 
@@ -39,7 +35,21 @@ export function buildBlockerChips(
   pr: DashboardPR,
   metadata: Record<string, string>,
   lifecyclePrReason?: string,
+  t?: (key: TranslationKey, vars?: Record<string, string | number>) => string,
 ): BlockerChip[] {
+  const translate =
+    t ??
+    ((key: TranslationKey, vars?: Record<string, string | number>) => {
+      if (key === "session.checksFailing")
+        return `${vars?.count} check${vars?.plural ?? ""} failing`;
+      if (key === "session.ciFailing") return "CI failing";
+      if (key === "session.ciPending") return "CI pending";
+      if (key === "session.changesRequestedTitle") return "Changes requested";
+      if (key === "session.awaitingReviewer") return "Awaiting reviewer";
+      if (key === "session.mergeConflicts") return "Merge conflicts";
+      if (key === "session.draft") return "Draft";
+      return key;
+    });
   const chips: BlockerChip[] = [];
 
   const ciNotified = Boolean(metadata["lastCIFailureDispatchHash"]);
@@ -62,35 +72,41 @@ export function buildBlockerChips(
     chips.push({
       icon: "✗",
       variant: "fail",
-      text: failCount > 0 ? `${failCount} check${failCount !== 1 ? "s" : ""} failing` : "CI failing",
+      text:
+        failCount > 0
+          ? translate("session.checksFailing", {
+              count: failCount,
+              plural: failCount !== 1 ? "s" : "",
+            })
+          : translate("session.ciFailing"),
       notified: ciNotified,
     });
   } else if (pr.ciStatus === CI_STATUS.PENDING) {
-    chips.push({ icon: "●", variant: "warn", text: "CI pending" });
+    chips.push({ icon: "●", variant: "warn", text: translate("session.ciPending") });
   }
 
   if (hasChangesRequested) {
     chips.push({
       icon: "✗",
       variant: "fail",
-      text: "Changes requested",
+      text: translate("session.changesRequestedTitle"),
       notified: reviewNotified,
     });
   } else if (!pr.mergeability.approved) {
-    chips.push({ icon: "○", variant: "muted", text: "Awaiting reviewer" });
+    chips.push({ icon: "○", variant: "muted", text: translate("session.awaitingReviewer") });
   }
 
   if (hasConflicts) {
     chips.push({
       icon: "✗",
       variant: "fail",
-      text: "Merge conflicts",
+      text: translate("session.mergeConflicts"),
       notified: conflictNotified,
     });
   }
 
   if (pr.isDraft) {
-    chips.push({ icon: "○", variant: "muted", text: "Draft" });
+    chips.push({ icon: "○", variant: "muted", text: translate("session.draft") });
   }
 
   return chips;
@@ -102,6 +118,7 @@ export function SessionDetailPRCard({
   lifecyclePrReason,
   onAskAgentToFix,
 }: SessionDetailPRCardProps) {
+  const { t } = useI18n();
   const [sendingComments, setSendingComments] = useState<Set<string>>(new Set());
   const [sentComments, setSentComments] = useState<Set<string>>(new Set());
   const [errorComments, setErrorComments] = useState<Set<string>>(new Set());
@@ -115,11 +132,7 @@ export function SessionDetailPRCard({
     };
   }, []);
 
-  const handleAskAgentToFix = async (comment: {
-    url: string;
-    path: string;
-    body: string;
-  }) => {
+  const handleAskAgentToFix = async (comment: { url: string; path: string; body: string }) => {
     setSentComments((prev) => {
       const next = new Set(prev);
       next.delete(comment.url);
@@ -176,7 +189,7 @@ export function SessionDetailPRCard({
   };
 
   const allGreen = isPRMergeReady(pr);
-  const blockerIssues = buildBlockerChips(pr, metadata, lifecyclePrReason);
+  const blockerIssues = buildBlockerChips(pr, metadata, lifecyclePrReason, t);
   const fileCount = pr.changedFiles ?? 0;
   const showDiffStats = !isPRUnenriched(pr);
   const showConflictActions = hasMergeConflicts(pr) && pr.state === "open";
@@ -222,12 +235,14 @@ export function SessionDetailPRCard({
         ) : null}
         {fileCount > 0 ? (
           <span className="session-detail-pr-card__diff-label">
-            {fileCount} file{fileCount !== 1 ? "s" : ""}
+            {t("session.filesChanged", { count: fileCount, plural: fileCount !== 1 ? "s" : "" })}
           </span>
         ) : null}
-        {pr.isDraft ? <span className="session-detail-pr-card__diff-label">Draft</span> : null}
+        {pr.isDraft ? (
+          <span className="session-detail-pr-card__diff-label">{t("session.draft")}</span>
+        ) : null}
         {pr.state === "merged" ? (
-          <span className="session-detail-pr-card__diff-label">Merged</span>
+          <span className="session-detail-pr-card__diff-label">{t("session.merged")}</span>
         ) : null}
       </div>
 
@@ -235,7 +250,7 @@ export function SessionDetailPRCard({
         <div
           className="session-detail-pr-card__merge-actions"
           role="group"
-          aria-label="Resolve merge conflicts"
+          aria-label={t("session.resolveMergeConflicts")}
         >
           <a
             href={compareUrl}
@@ -243,15 +258,15 @@ export function SessionDetailPRCard({
             rel="noopener noreferrer"
             className="session-detail-pr-merge-action"
           >
-            Compare with base branch
+            {t("session.compareWithBaseBranch")}
           </a>
           <button
             type="button"
             onClick={handleCopyBranch}
-            aria-label={branchCopied ? "Head branch name copied" : "Copy head branch name"}
+            aria-label={branchCopied ? t("session.headBranchCopied") : t("session.copyHeadBranch")}
             className="session-detail-pr-merge-action session-detail-pr-merge-action--btn"
           >
-            {branchCopied ? "Copied branch name" : "Copy head branch name"}
+            {branchCopied ? t("session.copiedBranchName") : t("session.copyHeadBranch")}
           </button>
         </div>
       ) : null}
@@ -269,7 +284,7 @@ export function SessionDetailPRCard({
             >
               <path d="M20 6L9 17l-5-5" />
             </svg>
-            Ready to merge
+            {t("session.readyToMerge")}
           </div>
         ) : (
           blockerIssues.map((issue) => (
@@ -284,7 +299,7 @@ export function SessionDetailPRCard({
             >
               {issue.icon} {issue.text}
               {issue.notified ? (
-                <span className="session-detail-blocker-chip__note">· notified</span>
+                <span className="session-detail-blocker-chip__note">· {t("session.notified")}</span>
               ) : null}
             </span>
           ))

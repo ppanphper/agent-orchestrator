@@ -3,9 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ToastProvider, useToast } from "@/components/Toast";
-
-const IDENTITY_FIELD_TOOLTIP =
-  "These describe which repo this is. Change them via `ao project relink`.";
+import { useI18n } from "@/lib/i18n";
 
 interface ProjectSettingsFormProps {
   projectId: string;
@@ -25,6 +23,7 @@ interface ProjectSettingsFormProps {
 }
 
 function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsFormProps) {
+  const { t } = useI18n();
   const router = useRouter();
   const { showToast } = useToast();
   const [agent, setAgent] = useState(initialValues.agent);
@@ -56,7 +55,7 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
       const trimmed = reactions.trim();
       parsedReactions = trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : undefined;
     } catch {
-      setInlineError("Reactions must be valid JSON.");
+      setInlineError(t("projectSettings.reactionsJsonInvalid"));
       return;
     }
 
@@ -76,7 +75,7 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
 
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {
-        const errorMessage = body?.error ?? "Failed to save project settings.";
+        const errorMessage = body?.error ?? t("projectSettings.saveFailed");
         if (response.status === 400) {
           setInlineError(errorMessage);
         } else {
@@ -85,10 +84,10 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
         return;
       }
 
-      showToast("Project settings updated.", "success");
+      showToast(t("projectSettings.updated"), "success");
       router.refresh();
     } catch {
-      setNetworkError("Network error while saving project settings.");
+      setNetworkError(t("projectSettings.networkSaveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -99,12 +98,12 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
       <section className="project-settings-form__section">
         <div className="project-settings-form__section-header">
           <div>
-            <p className="project-settings-form__eyebrow">
-              Behavior
-            </p>
-            <h2 className="project-settings-form__section-title">Runtime configuration</h2>
+            <p className="project-settings-form__eyebrow">{t("projectSettings.behavior")}</p>
+            <h2 className="project-settings-form__section-title">
+              {t("projectSettings.runtimeConfig")}
+            </h2>
             <p className="project-settings-form__section-copy">
-              These values change how AO runs this project without changing which repository the project points at.
+              {t("projectSettings.behaviorCopy")}
             </p>
           </div>
           <button
@@ -113,35 +112,35 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
             disabled={submitting}
             className="project-settings-form__save"
           >
-            {submitting ? "Saving..." : "Save changes"}
+            {submitting ? t("projectSettings.saving") : t("projectSettings.saveChanges")}
           </button>
         </div>
 
         <div className="project-settings-form__grid">
           <EditableField
             id="agent"
-            label="Agent"
+            label={t("projectSettings.agent")}
             value={agent}
             onChange={setAgent}
             placeholder="claude-code"
           />
           <EditableField
             id="runtime"
-            label="Runtime"
+            label={t("projectSettings.runtime")}
             value={runtime}
             onChange={setRuntime}
             placeholder="tmux"
           />
           <EditableField
             id="tracker-plugin"
-            label="Tracker plugin"
+            label={t("projectSettings.trackerPlugin")}
             value={trackerPlugin}
             onChange={setTrackerPlugin}
             placeholder="github"
           />
           <EditableField
             id="scm-plugin"
-            label="SCM plugin"
+            label={t("projectSettings.scmPlugin")}
             value={scmPlugin}
             onChange={setScmPlugin}
             placeholder="github"
@@ -150,11 +149,9 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
 
         <div className="project-settings-form__reactions">
           <label htmlFor="reactions" className="project-settings-form__label">
-            Reactions
+            {t("projectSettings.reactions")}
           </label>
-          <p className="project-settings-form__hint">
-            JSON object keyed by reaction name. This PATCH only sends behavior fields.
-          </p>
+          <p className="project-settings-form__hint">{t("projectSettings.reactionsHint")}</p>
           <textarea
             id="reactions"
             value={reactions}
@@ -182,28 +179,38 @@ function ProjectSettingsFormInner({ projectId, initialValues }: ProjectSettingsF
               onClick={() => void submit()}
               className="project-settings-form__retry"
             >
-              Retry
+              {t("projectSettings.retry")}
             </button>
           </div>
         ) : null}
       </section>
 
       <section className="project-settings-form__section">
-        <p className="project-settings-form__eyebrow">
-          Identity
-        </p>
-        <h2 className="project-settings-form__section-title">Repository identity</h2>
-        <p className="project-settings-form__section-copy">
-          These fields are read-only because they define which repository AO considers this project to be.
-        </p>
+        <p className="project-settings-form__eyebrow">{t("projectSettings.identity")}</p>
+        <h2 className="project-settings-form__section-title">
+          {t("projectSettings.repoIdentity")}
+        </h2>
+        <p className="project-settings-form__section-copy">{t("projectSettings.identityCopy")}</p>
 
         <div className="project-settings-form__grid">
-          <ReadonlyField id="identity-project-id" label="Project ID" value={initialValues.identity.projectId} />
-          <ReadonlyField id="identity-path" label="Path" value={initialValues.identity.path} />
-          <ReadonlyField id="identity-repo" label="Repo" value={initialValues.identity.repo} />
+          <ReadonlyField
+            id="identity-project-id"
+            label={t("addProject.projectId")}
+            value={initialValues.identity.projectId}
+          />
+          <ReadonlyField
+            id="identity-path"
+            label={t("projectSettings.path")}
+            value={initialValues.identity.path}
+          />
+          <ReadonlyField
+            id="identity-repo"
+            label={t("projectSettings.repo")}
+            value={initialValues.identity.repo}
+          />
           <ReadonlyField
             id="identity-default-branch"
-            label="Default branch"
+            label={t("projectSettings.defaultBranch")}
             value={initialValues.identity.defaultBranch}
           />
         </div>
@@ -239,15 +246,10 @@ function EditableField({
   );
 }
 
-function ReadonlyField({
-  id,
-  label,
-  value,
-}: {
-  id: string;
-  label: string;
-  value: string;
-}) {
+function ReadonlyField({ id, label, value }: { id: string; label: string; value: string }) {
+  const { t } = useI18n();
+  const identityFieldTooltip = t("projectSettings.identityTooltip");
+
   return (
     <label htmlFor={id} className="project-settings-form__field">
       <span className="project-settings-form__label">{label}</span>
@@ -256,12 +258,12 @@ function ReadonlyField({
         value={value}
         disabled
         readOnly
-        title={IDENTITY_FIELD_TOOLTIP}
+        title={identityFieldTooltip}
         aria-describedby={`${id}-tooltip`}
         className="project-settings-form__input project-settings-form__input--readonly"
       />
       <span id={`${id}-tooltip`} className="project-settings-form__hint">
-        {IDENTITY_FIELD_TOOLTIP}
+        {identityFieldTooltip}
       </span>
     </label>
   );

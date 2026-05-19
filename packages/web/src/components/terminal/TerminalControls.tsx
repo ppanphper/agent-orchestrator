@@ -2,6 +2,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 import { FONT_SIZE_MAX, FONT_SIZE_MIN } from "./terminal-font";
 
 type MuxStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -32,6 +33,7 @@ export function TerminalControls({
   muxStatus,
   error,
 }: TerminalControlsProps) {
+  const { t } = useI18n();
   const [reloading, setReloading] = useState(false);
   const [reloadError, setReloadError] = useState<string | null>(null);
 
@@ -47,14 +49,14 @@ export function TerminalControls({
           method: "POST",
         });
         if (!remapRes.ok) {
-          throw new Error(`Failed to remap OpenCode session: ${remapRes.status}`);
+          throw new Error(t("session.remapOpenCodeFailed", { status: remapRes.status }));
         }
         const remapData = (await remapRes.json()) as { opencodeSessionId?: unknown };
         if (
           typeof remapData.opencodeSessionId !== "string" ||
           remapData.opencodeSessionId.length === 0
         ) {
-          throw new Error("Missing OpenCode session id after remap");
+          throw new Error(t("session.missingOpenCodeSession"));
         }
         commandToSend = `/exit\nopencode --session ${remapData.opencodeSessionId}\n`;
       }
@@ -65,10 +67,10 @@ export function TerminalControls({
         body: JSON.stringify({ message: commandToSend }),
       });
       if (!sendRes.ok) {
-        throw new Error(`Failed to send reload command: ${sendRes.status}`);
+        throw new Error(t("session.reloadCommandFailed", { status: sendRes.status }));
       }
     } catch (err) {
-      setReloadError(err instanceof Error ? err.message : "Failed to reload OpenCode session");
+      setReloadError(err instanceof Error ? err.message : t("session.reloadOpenCodeFailed"));
     } finally {
       setReloading(false);
     }
@@ -86,12 +88,12 @@ export function TerminalControls({
 
   const statusText =
     displayStatus === "connected"
-      ? "Connected"
+      ? t("session.connected")
       : displayStatus === "error"
-        ? (error ?? "Error")
+        ? (error ?? t("session.error"))
         : displayStatus === "disconnected"
-          ? "Disconnected"
-          : "Connecting…";
+          ? t("session.disconnected")
+          : t("session.connecting");
 
   const statusTextColor =
     displayStatus === "connected"
@@ -108,7 +110,7 @@ export function TerminalControls({
         onClick={() => setFontSize((prev) => Math.max(FONT_SIZE_MIN, prev - 1))}
         disabled={fontSize <= FONT_SIZE_MIN}
         className="w-5 h-5 text-xs flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        aria-label="Decrease font size"
+        aria-label={t("session.decreaseFontSize")}
       >
         −
       </button>
@@ -119,7 +121,7 @@ export function TerminalControls({
         onClick={() => setFontSize((prev) => Math.min(FONT_SIZE_MAX, prev + 1))}
         disabled={fontSize >= FONT_SIZE_MAX}
         className="w-5 h-5 text-xs flex items-center justify-center rounded hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        aria-label="Increase font size"
+        aria-label={t("session.increaseFontSize")}
       >
         +
       </button>
@@ -130,8 +132,8 @@ export function TerminalControls({
     <button
       onClick={handleReload}
       disabled={reloading || muxStatus !== "connected"}
-      title="Restart OpenCode session (/exit then resume mapped session)"
-      aria-label="Restart OpenCode session"
+      title={t("session.restartOpenCodeTitle")}
+      aria-label={t("session.restartOpenCode")}
       className="flex items-center gap-1 px-2 py-0.5 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-70"
     >
       {reloading ? (
@@ -145,7 +147,7 @@ export function TerminalControls({
           >
             <path d="M12 3a9 9 0 109 9" />
           </svg>
-          restarting
+          {t("session.restarting")}
         </>
       ) : (
         <>
@@ -159,7 +161,7 @@ export function TerminalControls({
             <path d="M21 12a9 9 0 11-2.64-6.36" />
             <path d="M21 3v6h-6" />
           </svg>
-          restart
+          {t("session.restart")}
         </>
       )}
     </button>
@@ -172,7 +174,7 @@ export function TerminalControls({
         "flex items-center gap-1 px-2 py-0.5 text-[11px] text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)]",
         !isOpenCodeSession && !chromeless && "ml-auto",
       )}
-      aria-label={fullscreen ? "exit fullscreen" : "fullscreen"}
+      aria-label={fullscreen ? t("session.exitFullscreen") : t("session.fullscreen")}
     >
       {fullscreen ? (
         <>
@@ -185,7 +187,7 @@ export function TerminalControls({
           >
             <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" />
           </svg>
-          exit fullscreen
+          {t("session.exitFullscreen")}
         </>
       ) : (
         <>
@@ -198,7 +200,7 @@ export function TerminalControls({
           >
             <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
           </svg>
-          fullscreen
+          {t("session.fullscreen")}
         </>
       )}
     </button>
@@ -216,10 +218,13 @@ export function TerminalControls({
   return (
     <div className="terminal-chrome-bar flex items-center gap-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-3 py-2">
       {/* Pane label — matches the workspace pane-header style used elsewhere */}
-      <span className="terminal-chrome-pane-label">TERMINAL</span>
+      <span className="terminal-chrome-pane-label">{t("session.terminalLabel")}</span>
       {/* Identity group: session name on top, status+XDA below on mobile */}
       <div className="terminal-chrome-identity">
-        <span className="terminal-chrome-session-id font-[var(--font-mono)] text-[11px]" style={{ color: accentColor }}>
+        <span
+          className="terminal-chrome-session-id font-[var(--font-mono)] text-[11px]"
+          style={{ color: accentColor }}
+        >
           {sessionId}
         </span>
         <div className="terminal-chrome-status-row">

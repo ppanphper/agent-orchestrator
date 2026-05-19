@@ -1,4 +1,8 @@
+"use client";
+
 // ── State UI ──────────────────────────────────────────────────────────
+
+import { useI18n } from "@/lib/i18n";
 
 interface EmptyStateProps {
   message?: string;
@@ -8,8 +12,6 @@ interface EmptyStateProps {
   spawnDisabled?: boolean;
 }
 
-const KANBAN_GHOST_COLUMNS = ["Working", "Pending", "Review", "Respond", "Merge"] as const;
-
 export function EmptyState({
   message,
   orchestratorHref,
@@ -17,10 +19,19 @@ export function EmptyState({
   spawnLabel = "Spawn Orchestrator",
   spawnDisabled = false,
 }: EmptyStateProps) {
+  const { t } = useI18n();
+  const ghostColumns = [
+    t("emptyState.ghost.working"),
+    t("emptyState.ghost.pending"),
+    t("emptyState.ghost.review"),
+    t("emptyState.ghost.respond"),
+    t("emptyState.ghost.merge"),
+  ] as const;
+
   return (
     <div className="board-wrapper">
       <div className="kanban-ghost" aria-hidden="true">
-        {KANBAN_GHOST_COLUMNS.map((label) => (
+        {ghostColumns.map((label) => (
           <div key={label} className="kanban-ghost__col">
             <div className="kanban-ghost__head">{label}</div>
           </div>
@@ -88,10 +99,8 @@ export function EmptyState({
             <p className="empty-state__text">{message}</p>
           ) : (
             <>
-              <p className="empty-state__headline">Ready to orchestrate</p>
-              <p className="empty-state__hint">
-                Open the main orchestrator to start a session and fan out parallel agents across your codebase.
-              </p>
+              <p className="empty-state__headline">{t("emptyState.headline")}</p>
+              <p className="empty-state__hint">{t("emptyState.hint")}</p>
               {orchestratorHref ? (
                 <a href={orchestratorHref} className="empty-state__cta">
                   <svg
@@ -109,7 +118,7 @@ export function EmptyState({
                     <circle cx="12" cy="17" r="2" />
                     <circle cx="18" cy="17" r="2" />
                   </svg>
-                  Open Orchestrator
+                  {t("emptyState.openOrchestrator")}
                 </a>
               ) : onSpawnOrchestrator ? (
                 <button

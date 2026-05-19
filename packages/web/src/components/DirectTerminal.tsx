@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 
 import { getStoredFontSize } from "./terminal/terminal-font";
 import { TerminalControls } from "./terminal/TerminalControls";
@@ -50,6 +51,7 @@ export function DirectTerminal({
   chromeless = false,
   autoFocus = false,
 }: DirectTerminalProps) {
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -113,8 +115,8 @@ export function DirectTerminal({
             type="button"
             onClick={scrollToLatest}
             className="absolute bottom-3 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)] shadow-md active:scale-95"
-            aria-label="Jump to latest"
-            title="Jump to latest"
+            aria-label={t("session.jumpToLatest")}
+            title={t("session.jumpToLatest")}
           >
             <svg
               className="h-4 w-4"

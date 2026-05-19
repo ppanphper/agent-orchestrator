@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 const DISMISS_KEY = "ao.updateBanner.dismissedFor";
 
@@ -21,6 +22,7 @@ interface UpdateResponse {
 type Phase = "idle" | "starting" | "started" | "blocked" | "error";
 
 export function UpdateBanner() {
+  const { t } = useI18n();
   const [info, setInfo] = useState<VersionResponse | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -90,19 +92,19 @@ export function UpdateBanner() {
         return;
       }
       setPhase("error");
-      setErrorMessage(body.message ?? "Update failed");
+      setErrorMessage(body.message ?? t("update.failed"));
     } catch (err) {
       setPhase("error");
       setErrorMessage(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [t]);
 
   if (!info || !info.isOutdated || !info.latest) return null;
   if (info.channel === "manual") return null;
   if (dismissedFor === info.latest && phase === "idle") return null;
   if (phase === "started") return null;
 
-  const channelLabel = info.channel === "nightly" ? " (nightly)" : "";
+  const channelLabel = info.channel === "nightly" ? t("update.nightly") : "";
 
   return (
     <div
@@ -117,20 +119,22 @@ export function UpdateBanner() {
         />
         <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
           <span className="font-medium">
-            Update available{channelLabel}: {info.current} → {info.latest}
+            {t("update.available", {
+              channel: channelLabel,
+              current: info.current,
+              latest: info.latest,
+            })}
           </span>
           {phase === "blocked" && errorMessage ? (
             <span className="text-xs text-[var(--color-status-error)]">{errorMessage}</span>
           ) : phase === "error" && errorMessage ? (
-            <span className="text-xs text-[var(--color-status-error)]">
-              {errorMessage}
-            </span>
+            <span className="text-xs text-[var(--color-status-error)]">{errorMessage}</span>
           ) : phase === "starting" ? (
-            <span className="text-xs text-[var(--color-text-secondary)]">Starting…</span>
-          ) : (
             <span className="text-xs text-[var(--color-text-secondary)]">
-              Click Update to install. The dashboard will restart.
+              {t("update.starting")}
             </span>
+          ) : (
+            <span className="text-xs text-[var(--color-text-secondary)]">{t("update.hint")}</span>
           )}
         </div>
       </div>
@@ -141,15 +145,15 @@ export function UpdateBanner() {
           disabled={phase === "starting"}
           className="rounded-sm border border-[var(--color-accent-amber-border)] bg-[var(--color-accent-amber)] px-3 py-1 text-xs font-medium text-[var(--color-text-inverse)] hover:bg-[color-mix(in_srgb,var(--color-accent-amber)_85%,black)] disabled:cursor-wait disabled:opacity-60"
         >
-          {phase === "starting" ? "Updating…" : "Update"}
+          {phase === "starting" ? t("update.installing") : t("update.update")}
         </button>
         <button
           type="button"
           onClick={handleDismiss}
-          aria-label="Dismiss"
+          aria-label={t("common.dismiss")}
           className="rounded-sm px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
         >
-          Dismiss
+          {t("common.dismiss")}
         </button>
       </div>
     </div>

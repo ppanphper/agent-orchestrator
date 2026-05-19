@@ -29,6 +29,7 @@ import { ProjectSidebar } from "./ProjectSidebar";
 import { isOrchestratorSession } from "@aoagents/ao-core/types";
 import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { BottomSheet } from "./BottomSheet";
+import { useI18n } from "@/lib/i18n";
 import { BacklogPanel } from "./BacklogPanel";
 
 interface DashboardProps {
@@ -86,6 +87,7 @@ function DoneCard({
   session: DashboardSession;
   onRestore: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const title =
     (!session.summaryIsFallback && session.summary) ||
     session.issueTitle ||
@@ -94,7 +96,11 @@ function DoneCard({
   const isMerged = session.pr?.state === "merged" || session.status === "merged";
   const isTerminated = isDashboardSessionTerminated(session);
   const canRestore = isDashboardSessionRestorable(session);
-  const badgeLabel = isMerged ? "merged" : isTerminated ? "terminated" : "done";
+  const badgeLabel = isMerged
+    ? t("done.merged")
+    : isTerminated
+      ? t("done.terminated")
+      : t("done.done");
   const badgeClass = `done-card__badge ${isTerminated ? "done-card__badge--terminated" : "done-card__badge--merged"}`;
 
   return (
@@ -135,7 +141,7 @@ function DoneCard({
               onRestore(session.id);
             }}
           >
-            Restore
+            {t("done.restore")}
           </button>
         ) : null}
       </div>
@@ -152,6 +158,7 @@ function DashboardInner({
   attentionZones = "simple",
   dashboardLoadError,
 }: DashboardProps) {
+  const { t } = useI18n();
   const orchestratorLinks = orchestrators ?? EMPTY_ORCHESTRATORS;
   const mux = useMuxOptional();
   const kanbanLevels =
@@ -282,8 +289,11 @@ function DashboardInner({
   useEffect(() => {
     const needsAttention = countNeedingAttention(attentionLevels);
     const label = projectName ?? "ao";
-    document.title = needsAttention > 0 ? `${label} (${needsAttention} need attention)` : label;
-  }, [attentionLevels, projectName]);
+    document.title =
+      needsAttention > 0
+        ? `${label} (${t("dashboard.needAttention", { count: needsAttention })})`
+        : label;
+  }, [attentionLevels, projectName, t]);
 
   const grouped = useMemo(() => {
     const zones: Record<AttentionLevel, DashboardSession[]> = {
@@ -356,7 +366,7 @@ function DashboardInner({
           const text = await res.text();
           const messageText = text || "Unknown error";
           console.error(`Failed to send message to ${sessionId}:`, messageText);
-          showToast(`Send failed: ${messageText}`, "error");
+          showToast(t("dashboard.sendFailed", { message: messageText }), "error");
           const errorWithToast = new Error(messageText);
           (errorWithToast as Error & { toastShown?: boolean }).toastShown = true;
           throw errorWithToast;
@@ -368,12 +378,12 @@ function DashboardInner({
           (error as Error & { toastShown?: boolean }).toastShown;
         if (!toastShown) {
           console.error(`Network error sending message to ${sessionId}:`, error);
-          showToast("Network error while sending message", "error");
+          showToast(t("dashboard.sendNetworkError"), "error");
         }
         throw error;
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const killSession = useCallback(
@@ -385,16 +395,16 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to kill ${sessionId}:`, text);
-          showToast(`Terminate failed: ${text}`, "error");
+          showToast(t("dashboard.terminateFailed", { message: text }), "error");
         } else {
-          showToast("Session terminated", "success");
+          showToast(t("dashboard.terminated"), "success");
         }
       } catch (error) {
         console.error(`Network error killing ${sessionId}:`, error);
-        showToast("Network error while terminating session", "error");
+        showToast(t("dashboard.terminateNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleKill = useCallback(
@@ -432,17 +442,17 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to merge PR #${prNumber}:`, text);
-          showToast(`Merge failed: ${text}`, "error");
+          showToast(t("dashboard.mergeFailed", { message: text }), "error");
           return;
         } else {
-          showToast(`PR #${prNumber} merged`, "success");
+          showToast(t("dashboard.merged", { number: prNumber }), "success");
         }
       } catch (error) {
         console.error(`Network error merging PR #${prNumber}:`, error);
-        showToast("Network error while merging PR", "error");
+        showToast(t("dashboard.mergeNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleRestore = useCallback(
@@ -454,17 +464,17 @@ function DashboardInner({
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to restore ${sessionId}:`, text);
-          showToast(`Restore failed: ${text}`, "error");
+          showToast(t("dashboard.restoreFailed", { message: text }), "error");
         } else {
-          showToast("Session restored", "success");
+          showToast(t("dashboard.restored"), "success");
           routerRef.current.refresh();
         }
       } catch (error) {
         console.error(`Network error restoring ${sessionId}:`, error);
-        showToast("Network error while restoring session", "error");
+        showToast(t("dashboard.restoreNetworkError"), "error");
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleSpawnOrchestrator = async (project: ProjectInfo) => {
@@ -486,7 +496,7 @@ function DashboardInner({
       } | null;
 
       if (!res.ok || !data?.orchestrator) {
-        throw new Error(data?.error ?? `Failed to spawn orchestrator for ${project.name}`);
+        throw new Error(data?.error ?? `${t("dashboard.spawnFailed")} ${project.name}`);
       }
 
       const orchestrator = data.orchestrator;
@@ -497,7 +507,7 @@ function DashboardInner({
         return next;
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to spawn orchestrator";
+      const message = error instanceof Error ? error.message : t("dashboard.spawnFailed");
       setSpawnErrors((current) => ({ ...current, [project.id]: message }));
       console.error(`Failed to spawn orchestrator for ${project.id}:`, error);
     } finally {
@@ -515,13 +525,10 @@ function DashboardInner({
       aria-live="assertive"
     >
       <span className="font-semibold text-[var(--color-status-error)]">
-        Orchestrator failed to load
+        {t("dashboard.loadFailed")}
       </span>
       <span className="break-words text-[var(--color-text-secondary)]">{visibleLoadError}</span>
-      <span className="text-[var(--color-text-secondary)]">
-        Confirm <span className="font-mono text-[10px]">agent-orchestrator.yaml</span> exists and is
-        valid, then run <span className="font-mono text-[10px]">ao doctor</span> for diagnostics.
-      </span>
+      <span className="text-[var(--color-text-secondary)]">{t("dashboard.loadHint")}</span>
     </div>
   ) : null;
 
@@ -532,8 +539,8 @@ function DashboardInner({
   const normalizedProjectName = projectName?.trim().toLowerCase();
   const headerProjectLabel =
     normalizedProjectName === "agent orchestrator"
-      ? (projectId ?? projectName ?? (allProjectsView ? "All projects" : "Dashboard"))
-      : (projectName ?? (allProjectsView ? "All projects" : "Dashboard"));
+      ? (projectId ?? projectName ?? (allProjectsView ? t("app.allProjects") : t("app.dashboard")))
+      : (projectName ?? (allProjectsView ? t("app.allProjects") : t("app.dashboard")));
   const showHeaderProjectLabel = !allProjectsView && headerProjectLabel.trim().length > 0;
 
   const handleZoneToggle = (level: AttentionLevel) => {
@@ -585,7 +592,7 @@ function DashboardInner({
           )}
         </button>
         <div className="dashboard-app-header__brand dashboard-app-header__brand--hide-mobile">
-          <span>Agent Orchestrator</span>
+          <span>{t("app.name")}</span>
         </div>
         {showHeaderProjectLabel ? (
           <>
@@ -600,7 +607,7 @@ function DashboardInner({
                     <div className="topbar-status-pill topbar-status-pill--active">
                       <span className="topbar-status-pill__dot topbar-status-pill__dot--working" />
                       <span className="topbar-status-pill__label">
-                        {grouped.working.length} working
+                        {t("dashboard.workingCount", { count: grouped.working.length })}
                       </span>
                     </div>
                   ) : null}
@@ -612,11 +619,13 @@ function DashboardInner({
                     <div className="topbar-status-pill topbar-status-pill--waiting-for-input">
                       <span className="topbar-status-pill__dot topbar-status-pill__dot--attention" />
                       <span className="topbar-status-pill__label">
-                        {grouped.merge.length +
-                          grouped.action.length +
-                          grouped.respond.length +
-                          grouped.review.length}{" "}
-                        need attention
+                        {t("dashboard.needAttention", {
+                          count:
+                            grouped.merge.length +
+                            grouped.action.length +
+                            grouped.respond.length +
+                            grouped.review.length,
+                        })}
                       </span>
                     </div>
                   ) : null}
@@ -632,7 +641,7 @@ function DashboardInner({
             <Link
               href={orchestratorHref}
               className="dashboard-app-btn dashboard-app-btn--amber"
-              aria-label="Orchestrator"
+              aria-label={t("dashboard.orchestrator")}
             >
               <svg
                 width="12"
@@ -649,13 +658,13 @@ function DashboardInner({
                 <circle cx="12" cy="17" r="2" />
                 <circle cx="18" cy="17" r="2" />
               </svg>
-              Orchestrator
+              {t("dashboard.orchestrator")}
             </Link>
           ) : canSpawnProjectOrchestrator && activeProject ? (
             <button
               type="button"
               className="dashboard-app-btn dashboard-app-btn--amber"
-              aria-label="Spawn Orchestrator"
+              aria-label={t("dashboard.spawnOrchestrator")}
               onClick={() => void handleSpawnOrchestrator(activeProject)}
               disabled={isSpawningCurrentProject}
             >
@@ -674,7 +683,9 @@ function DashboardInner({
                 <circle cx="12" cy="17" r="2" />
                 <circle cx="18" cy="17" r="2" />
               </svg>
-              {isSpawningCurrentProject ? "Spawning..." : "Spawn Orchestrator"}
+              {isSpawningCurrentProject
+                ? t("dashboard.spawning")
+                : t("dashboard.spawnOrchestrator")}
             </button>
           ) : null}
         </div>
@@ -683,10 +694,8 @@ function DashboardInner({
       <main className="dashboard-main flex-1 min-h-0 overflow-hidden">
         <DynamicFavicon attentionLevels={attentionLevels} projectName={projectName} />
         <div className="dashboard-main__subhead">
-          <h1 className="dashboard-main__title">Dashboard</h1>
-          <p className="dashboard-main__subtitle">
-            Live agent sessions, pull requests, and merge status.
-          </p>
+          <h1 className="dashboard-main__title">{t("dashboard.title")}</h1>
+          <p className="dashboard-main__subtitle">{t("dashboard.subtitle")}</p>
         </div>
 
         <div className="dashboard-main__body">
@@ -704,14 +713,11 @@ function DashboardInner({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8v4M12 16h.01" />
               </svg>
-              <span className="flex-1">
-                GitHub API rate limited — PR data (CI status, review state, sizes) may be stale.
-                Will retry automatically on next refresh.
-              </span>
+              <span className="flex-1">{t("dashboard.rateLimited")}</span>
               <button
                 onClick={() => setRateLimitDismissed(true)}
                 className="ml-1 shrink-0 opacity-60 hover:opacity-100"
-                aria-label="Dismiss"
+                aria-label={t("common.dismiss")}
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -776,7 +782,11 @@ function DashboardInner({
                     }
                   : null
               }
-              spawnLabel={isSpawningCurrentProject ? "Spawning..." : "Spawn Orchestrator"}
+              spawnLabel={
+                isSpawningCurrentProject
+                  ? t("dashboard.spawning")
+                  : t("dashboard.spawnOrchestrator")
+              }
               spawnDisabled={isSpawningCurrentProject}
             />
           ) : null}
@@ -805,7 +815,7 @@ function DashboardInner({
                 >
                   <path d="m9 18 6-6-6-6" />
                 </svg>
-                <span className="done-bar__label">Done / Terminated</span>
+                <span className="done-bar__label">{t("dashboard.doneTerminated")}</span>
                 <span className="done-bar__count">{grouped.done.length}</span>
               </button>
               {doneExpanded && (
@@ -906,6 +916,8 @@ function ProjectOverviewGrid({
   spawnErrors: Record<string, string>;
   attentionZones: DashboardAttentionZoneMode;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {overviews.map(({ project, orchestrator, sessionCount, openPRCount, counts }) =>
@@ -925,12 +937,18 @@ function ProjectOverviewGrid({
                   </h2>
                   <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
                     {isDegraded ? (
-                      "Config needs repair"
+                      t("projects.configNeedsRepair")
                     ) : (
                       <>
-                        {sessionCount} active session{sessionCount !== 1 ? "s" : ""}
+                        {t("projects.activeSessions", {
+                          count: sessionCount,
+                          plural: sessionCount !== 1 ? "s" : "",
+                        })}
                         {openPRCount > 0
-                          ? ` · ${openPRCount} open PR${openPRCount !== 1 ? "s" : ""}`
+                          ? ` · ${t("projects.openPRs", {
+                              count: openPRCount,
+                              plural: openPRCount !== 1 ? "s" : "",
+                            })}`
                           : ""}
                       </>
                     )}
@@ -940,39 +958,63 @@ function ProjectOverviewGrid({
                   href={projectHref}
                   className="border border-[var(--color-border-default)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:no-underline"
                 >
-                  Open project
+                  {t("projects.openProject")}
                 </Link>
               </div>
 
               <div className="mb-4 flex flex-wrap gap-2">
-                <ProjectMetric label="Merge" value={counts.merge} tone="ready" />
+                <ProjectMetric
+                  label={t("projects.metrics.merge")}
+                  value={counts.merge}
+                  tone="ready"
+                />
                 {attentionZones === "detailed" ? (
                   <>
-                    <ProjectMetric label="Respond" value={counts.respond} tone="error" />
-                    <ProjectMetric label="Review" value={counts.review} tone="orange" />
+                    <ProjectMetric
+                      label={t("projects.metrics.respond")}
+                      value={counts.respond}
+                      tone="error"
+                    />
+                    <ProjectMetric
+                      label={t("projects.metrics.review")}
+                      value={counts.review}
+                      tone="orange"
+                    />
                   </>
                 ) : (
-                  <ProjectMetric label="Action" value={counts.action} tone="orange" />
+                  <ProjectMetric
+                    label={t("projects.metrics.action")}
+                    value={counts.action}
+                    tone="orange"
+                  />
                 )}
-                <ProjectMetric label="Pending" value={counts.pending} tone="attention" />
-                <ProjectMetric label="Working" value={counts.working} tone="working" />
+                <ProjectMetric
+                  label={t("projects.metrics.pending")}
+                  value={counts.pending}
+                  tone="attention"
+                />
+                <ProjectMetric
+                  label={t("projects.metrics.working")}
+                  value={counts.working}
+                  tone="working"
+                />
               </div>
 
               <div className="border-t border-[var(--color-border-subtle)] pt-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] text-[var(--color-text-muted)]">
                     {isDegraded
-                      ? "Project config could not be resolved"
+                      ? t("projects.configUnresolved")
                       : orchestrator
-                        ? "Per-project orchestrator available"
-                        : "No running orchestrator"}
+                        ? t("projects.orchestratorAvailable")
+                        : t("projects.noOrchestrator")}
                   </div>
                   {isDegraded ? (
                     <Link
                       href={projectHref}
                       className="border border-[var(--color-border-default)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:no-underline"
                     >
-                      Repair project
+                      {t("projects.repairProject")}
                     </Link>
                   ) : orchestrator ? (
                     <Link
@@ -980,7 +1022,7 @@ function ProjectOverviewGrid({
                       className="orchestrator-btn flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold hover:no-underline"
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] opacity-80" />
-                      orchestrator
+                      {t("projects.orchestratorLink")}
                     </Link>
                   ) : (
                     <button
@@ -990,8 +1032,8 @@ function ProjectOverviewGrid({
                       className="orchestrator-btn px-3 py-1.5 text-[11px] font-semibold disabled:cursor-wait disabled:opacity-70"
                     >
                       {spawningProjectIds.includes(project.id)
-                        ? "Spawning..."
-                        : "Spawn Orchestrator"}
+                        ? t("dashboard.spawning")
+                        : t("dashboard.spawnOrchestrator")}
                     </button>
                   )}
                 </div>

@@ -3,12 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { CI_STATUS } from "@aoagents/ao-core/types";
 import { cn } from "@/lib/cn";
-import {
-  type DashboardSession,
-  type DashboardPR,
-  isPRMergeReady,
-} from "@/lib/types";
+import { type DashboardSession, type DashboardPR, isPRMergeReady } from "@/lib/types";
 import type { ProjectInfo } from "@/lib/project-name";
+import { useI18n } from "@/lib/i18n";
 import { SessionDetailPRCard } from "./SessionDetailPRCard";
 import { askAgentToFix } from "./session-detail-agent-actions";
 import { buildGitHubBranchUrl } from "./session-detail-utils";
@@ -28,7 +25,7 @@ interface SessionDetailHeaderProps {
   isMobile: boolean;
   terminalEnded: boolean;
   isRestorable: boolean;
-  activity: { label: string; color: string };
+  activity: { label: string; color: string; classLabel?: string };
   headline: string;
   projects: ProjectInfo[];
   orchestratorHref: string | null;
@@ -44,13 +41,34 @@ function normalizeActivityLabelForClass(activityLabel: string): string {
 }
 
 function OrchestratorZonePills({ zones }: { zones: OrchestratorZones }) {
+  const { t } = useI18n();
   const stats: Array<{ value: number; label: string; toneClass: string }> = [
-    { value: zones.merge, label: "merge", toneClass: "topbar-zone-pill--merge" },
-    { value: zones.respond, label: "respond", toneClass: "topbar-zone-pill--respond" },
-    { value: zones.review, label: "review", toneClass: "topbar-zone-pill--review" },
-    { value: zones.working, label: "working", toneClass: "topbar-zone-pill--working" },
-    { value: zones.pending, label: "pending", toneClass: "topbar-zone-pill--pending" },
-    { value: zones.done, label: "done", toneClass: "topbar-zone-pill--done" },
+    {
+      value: zones.merge,
+      label: t("projects.metrics.merge"),
+      toneClass: "topbar-zone-pill--merge",
+    },
+    {
+      value: zones.respond,
+      label: t("projects.metrics.respond"),
+      toneClass: "topbar-zone-pill--respond",
+    },
+    {
+      value: zones.review,
+      label: t("projects.metrics.review"),
+      toneClass: "topbar-zone-pill--review",
+    },
+    {
+      value: zones.working,
+      label: t("projects.metrics.working"),
+      toneClass: "topbar-zone-pill--working",
+    },
+    {
+      value: zones.pending,
+      label: t("projects.metrics.pending"),
+      toneClass: "topbar-zone-pill--pending",
+    },
+    { value: zones.done, label: t("zones.done.label"), toneClass: "topbar-zone-pill--done" },
   ].filter((s) => s.value > 0);
 
   if (stats.length === 0) return null;
@@ -83,6 +101,7 @@ export function SessionDetailHeader({
   onKill,
   onRelaunchClean,
 }: SessionDetailHeaderProps) {
+  const { t } = useI18n();
   const pr = session.pr;
   const allGreen = pr ? isPRMergeReady(pr) : false;
   const [prPopoverOpen, setPrPopoverOpen] = useState(false);
@@ -108,8 +127,7 @@ export function SessionDetailHeader({
 
   const headerProjectLabel =
     projects.find((project) => project.id === session.projectId)?.name ?? session.projectId;
-  const showHeaderProjectLabel =
-    headerProjectLabel.trim().toLowerCase() !== "agent orchestrator";
+  const showHeaderProjectLabel = headerProjectLabel.trim().toLowerCase() !== "agent orchestrator";
 
   return (
     <header className="dashboard-app-header">
@@ -118,7 +136,7 @@ export function SessionDetailHeader({
           type="button"
           className="dashboard-app-sidebar-toggle"
           onClick={onToggleSidebar}
-          aria-label="Toggle sidebar"
+          aria-label={t("nav.toggleSidebar")}
         >
           {isMobile ? (
             <svg
@@ -149,7 +167,7 @@ export function SessionDetailHeader({
         </button>
       ) : null}
       <div className="dashboard-app-header__brand dashboard-app-header__brand--hide-mobile">
-        <span>Agent Orchestrator</span>
+        <span>{t("app.name")}</span>
       </div>
       {showHeaderProjectLabel && (
         <span className="dashboard-app-header__sep topbar-desktop-only" aria-hidden="true" />
@@ -159,24 +177,19 @@ export function SessionDetailHeader({
           {showHeaderProjectLabel && (
             <span className="dashboard-app-header__project">{headerProjectLabel}</span>
           )}
-          <span className="dashboard-app-header__session-id topbar-mobile-only">
-            {session.id}
-          </span>
+          <span className="dashboard-app-header__session-id topbar-mobile-only">{session.id}</span>
           {isOrchestrator && (
-            <span className="session-detail-mode-badge">orchestrator</span>
+            <span className="session-detail-mode-badge">{t("session.orchestratorMode")}</span>
           )}
         </div>
         <div className="topbar-session-pills">
           <div
             className={cn(
               "topbar-status-pill",
-              `topbar-status-pill--${normalizeActivityLabelForClass(activity.label)}`,
+              `topbar-status-pill--${normalizeActivityLabelForClass(activity.classLabel ?? activity.label)}`,
             )}
           >
-            <span
-              className="topbar-status-pill__dot"
-              style={{ background: activity.color }}
-            />
+            <span className="topbar-status-pill__dot" style={{ background: activity.color }} />
             <span className="topbar-status-pill__label">{activity.label}</span>
           </div>
           {session.branch ? (
@@ -199,12 +212,8 @@ export function SessionDetailHeader({
         </div>
       </div>
       <span className="dashboard-app-header__sep topbar-desktop-only" aria-hidden="true" />
-      <span className="dashboard-app-header__session-title topbar-desktop-only">
-        {headline}
-      </span>
-      <span className="dashboard-app-header__session-id topbar-desktop-only">
-        {session.id}
-      </span>
+      <span className="dashboard-app-header__session-title topbar-desktop-only">{headline}</span>
+      <span className="dashboard-app-header__session-id topbar-desktop-only">{session.id}</span>
       <div className="dashboard-app-header__spacer" />
       <div className="dashboard-app-header__actions">
         {pr ? (
@@ -230,8 +239,7 @@ export function SessionDetailHeader({
                   "topbar-pr-dot",
                   allGreen
                     ? "topbar-pr-dot--green"
-                    : pr.ciStatus === CI_STATUS.FAILING ||
-                        pr.reviewDecision === "changes_requested"
+                    : pr.ciStatus === CI_STATUS.FAILING || pr.reviewDecision === "changes_requested"
                       ? "topbar-pr-dot--red"
                       : "topbar-pr-dot--amber",
                 )}
@@ -283,7 +291,7 @@ export function SessionDetailHeader({
               <path d="M4 13a8 8 0 0 0 14.9 3.98" />
               <path d="M20 19v-4h-4" />
             </svg>
-            <span className="topbar-btn-label">Restore</span>
+            <span className="topbar-btn-label">{t("session.restoreAction")}</span>
           </button>
         ) : !isOrchestrator && !terminalEnded ? (
           <button
@@ -300,7 +308,7 @@ export function SessionDetailHeader({
             >
               <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
-            <span className="topbar-btn-label">Kill</span>
+            <span className="topbar-btn-label">{t("session.kill")}</span>
           </button>
         ) : null}
 
@@ -309,7 +317,7 @@ export function SessionDetailHeader({
             type="button"
             className="dashboard-app-btn dashboard-app-btn--amber"
             onClick={onRelaunchClean}
-            aria-label="Launch Orchestrator (clean context)"
+            aria-label={t("session.relaunchCleanLabel")}
           >
             <svg
               className="h-3.5 w-3.5"
@@ -324,7 +332,7 @@ export function SessionDetailHeader({
               <path d="M4 13a8 8 0 0 0 14.9 3.98" />
               <path d="M20 19v-4h-4" />
             </svg>
-            <span className="topbar-btn-label">Relaunch (clean)</span>
+            <span className="topbar-btn-label">{t("session.relaunchClean")}</span>
           </button>
         ) : null}
 
@@ -332,7 +340,7 @@ export function SessionDetailHeader({
           <a
             href={orchestratorHref}
             className="dashboard-app-btn dashboard-app-btn--amber topbar-desktop-only"
-            aria-label="Orchestrator"
+            aria-label={t("dashboard.orchestrator")}
           >
             <svg
               width="12"
@@ -349,7 +357,7 @@ export function SessionDetailHeader({
               <circle cx="12" cy="17" r="2" />
               <circle cx="18" cy="17" r="2" />
             </svg>
-            <span className="topbar-btn-label">Orchestrator</span>
+            <span className="topbar-btn-label">{t("dashboard.orchestrator")}</span>
           </a>
         ) : null}
       </div>

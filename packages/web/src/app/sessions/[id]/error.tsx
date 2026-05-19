@@ -3,28 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
-function getSessionErrorMessage(error: Error): string {
+function getSessionErrorMessage(
+  error: Error,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
   const normalized = error.message.toLowerCase();
-  if (normalized.includes("timed out")) {
-    return "The session request did not complete in time. Check the backend process and try again once the API is responsive.";
-  }
-  if (normalized.includes("network")) {
-    return "The session request failed before the dashboard got a response. Check the server connection and try again.";
-  }
-  if (normalized.includes("403")) {
-    return "The dashboard could not access this session. Permissions or auth may have changed.";
-  }
-  if (normalized.includes("404")) {
-    return "This session is no longer available. It may have been removed while the page was open.";
-  }
-  if (normalized.includes("500")) {
-    return "The server returned an internal error while loading this session. Try re-fetching the session data.";
-  }
+  if (normalized.includes("timed out")) return t("session.loadTimeout");
+  if (normalized.includes("network")) return t("session.loadNetwork");
+  if (normalized.includes("403")) return t("session.loadForbidden");
+  if (normalized.includes("404")) return t("session.loadMissing");
+  if (normalized.includes("500")) return t("session.loadServer");
   if (error.message.trim().length > 0) {
     return error.message;
   }
-  return "The dashboard could not load this session cleanly. Try again to re-fetch the latest state.";
+  return t("session.loadGeneric");
 }
 
 export default function SessionError({
@@ -34,6 +28,7 @@ export default function SessionError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { t } = useI18n();
   const router = useRouter();
 
   useEffect(() => {
@@ -42,17 +37,17 @@ export default function SessionError({
 
   return (
     <ErrorDisplay
-      title="Failed to load session"
-      message={getSessionErrorMessage(error)}
+      title={t("session.loadFailedTitle")}
+      message={getSessionErrorMessage(error, t)}
       tone="error"
       primaryAction={{
-        label: "Try again",
+        label: t("common.retry"),
         onClick: () => {
           reset();
           router.refresh();
         },
       }}
-      secondaryAction={{ label: "Back to dashboard", href: "/" }}
+      secondaryAction={{ label: t("common.backToDashboard"), href: "/" }}
       error={error}
       compact
       chrome="card"

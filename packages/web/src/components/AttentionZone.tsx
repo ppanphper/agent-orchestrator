@@ -1,14 +1,11 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
-import {
-  type DashboardSession,
-  type AttentionLevel,
-  isPRMergeReady,
-} from "@/lib/types";
+import { type DashboardSession, type AttentionLevel, isPRMergeReady } from "@/lib/types";
 import { SessionCard } from "./SessionCard";
 import { getSessionTitle } from "@/lib/format";
 import { projectSessionPath } from "@/lib/routes";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 interface AttentionZoneProps {
   level: AttentionLevel;
@@ -29,41 +26,24 @@ interface AttentionZoneProps {
   resetKey?: string | number | null;
 }
 
-const zoneConfig: Record<
-  AttentionLevel,
-  {
-    label: string;
-    emptyMessage: string;
-  }
-> = {
-  merge: {
-    label: "Ready",
-    emptyMessage: "Nothing cleared to land yet.",
-  },
-  action: {
-    label: "Action",
-    emptyMessage: "No agents need your input.",
-  },
-  respond: {
-    label: "Respond",
-    emptyMessage: "No agents need your input.",
-  },
-  review: {
-    label: "Review",
-    emptyMessage: "No code waiting for review.",
-  },
-  pending: {
-    label: "Pending",
-    emptyMessage: "Nothing blocked.",
-  },
-  working: {
-    label: "Working",
-    emptyMessage: "No agents running.",
-  },
-  done: {
-    label: "Done",
-    emptyMessage: "No completed sessions.",
-  },
+const zoneLabelKeys: Record<AttentionLevel, TranslationKey> = {
+  merge: "zones.merge.label",
+  action: "zones.action.label",
+  respond: "zones.respond.label",
+  review: "zones.review.label",
+  pending: "zones.pending.label",
+  working: "zones.working.label",
+  done: "zones.done.label",
+};
+
+const zoneEmptyKeys: Record<AttentionLevel, TranslationKey> = {
+  merge: "zones.merge.empty",
+  action: "zones.action.empty",
+  respond: "zones.respond.empty",
+  review: "zones.review.empty",
+  pending: "zones.pending.empty",
+  working: "zones.working.empty",
+  done: "zones.done.empty",
 };
 
 /**
@@ -88,7 +68,11 @@ function AttentionZoneView({
   onPreview,
   resetKey,
 }: AttentionZoneProps) {
-  const config = zoneConfig[level];
+  const { t } = useI18n();
+  const config = {
+    label: t(zoneLabelKeys[level]),
+    emptyMessage: t(zoneEmptyKeys[level]),
+  };
   const isAccordion = onToggle !== undefined;
   const [showAll, setShowAll] = useState(false);
   const visibleSessions =
@@ -121,7 +105,9 @@ function AttentionZoneView({
           <span className="accordion-header__dot" data-level={level} />
           <span className="accordion-header__label">{config.label}</span>
           <span className="accordion-header__count">{sessions.length}</span>
-          <span className="accordion-header__chevron" aria-hidden="true">▶</span>
+          <span className="accordion-header__chevron" aria-hidden="true">
+            ▶
+          </span>
         </button>
 
         <div id={`accordion-body-${level}`} className="accordion-body">
@@ -152,7 +138,7 @@ function AttentionZoneView({
                   className="mobile-session-list__view-all"
                   onClick={() => setShowAll(true)}
                 >
-                  View all {sessions.length}
+                  {t("zones.viewAll", { count: sessions.length })}
                 </button>
               ) : null}
             </div>
@@ -224,6 +210,7 @@ function MobileSessionRow({
   level: AttentionLevel;
   onPreview?: (session: DashboardSession) => void;
 }) {
+  const { t } = useI18n();
   const meta = [
     session.branch,
     session.pr ? `PR #${session.pr.number}` : null,
@@ -236,26 +223,22 @@ function MobileSessionRow({
         type="button"
         className="mobile-session-row__preview"
         onClick={() => onPreview?.(session)}
-        aria-label={`Open ${getSessionTitle(session)}`}
+        aria-label={t("zones.openSession", { title: getSessionTitle(session) })}
       >
         <div className="mobile-session-row__line">
-          <span
-            className="mobile-session-row__dot"
-            data-level={level}
-            aria-hidden="true"
-          />
+          <span className="mobile-session-row__dot" data-level={level} aria-hidden="true" />
           <span className="mobile-session-row__title">{getSessionTitle(session)}</span>
         </div>
         <div className="mobile-session-row__meta">
-          {meta.length > 0 ? meta.join(" · ") : "No branch or PR metadata"}
+          {meta.length > 0 ? meta.join(" · ") : t("zones.noMetadata")}
         </div>
       </button>
       <div className="mobile-session-row__side">
         <SessionStateChip session={session} level={level} />
         <a
-            href={projectSessionPath(session.projectId, session.id)}
+          href={projectSessionPath(session.projectId, session.id)}
           className="mobile-session-row__open"
-          aria-label={`Go to ${getSessionTitle(session)}`}
+          aria-label={t("zones.goToSession", { title: getSessionTitle(session) })}
         >
           <svg
             className="mobile-session-row__open-icon"
@@ -314,21 +297,51 @@ function SessionStateChip({
   session: DashboardSession;
   level: AttentionLevel;
 }) {
-  let label = zoneConfig[level].label.toLowerCase();
+  const { t } = useI18n();
+  let label = t(zoneLabelKeys[level]).toLowerCase();
 
   if (level === "merge" && session.pr && isPRMergeReady(session.pr)) {
-    label = "ready";
+    label = t("zones.chips.ready");
   } else if (level === "action") {
-    label = getActionChipLabel(session);
+    label = translateActionChipLabel(getActionChipLabel(session), t);
   } else if (level === "respond") {
-    label = session.activity === "waiting_input" ? "waiting" : "needs input";
+    label =
+      session.activity === "waiting_input" ? t("zones.chips.waiting") : t("zones.chips.needsInput");
   } else if (level === "review") {
-    label = session.pr?.reviewDecision === "changes_requested" ? "changes" : "review";
+    label =
+      session.pr?.reviewDecision === "changes_requested"
+        ? t("zones.chips.changes")
+        : t("zones.chips.review");
   } else if (level === "pending") {
-    label = session.pr?.unresolvedThreads ? "threads" : "pending";
+    label = session.pr?.unresolvedThreads ? t("zones.chips.threads") : t("zones.chips.pending");
   } else if (level === "working") {
-    label = session.activity === "idle" ? "idle" : "active";
+    label = session.activity === "idle" ? t("zones.chips.idle") : t("zones.chips.active");
   }
 
   return <span className="mobile-session-row__chip">{label}</span>;
+}
+
+function translateActionChipLabel(label: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (label) {
+    case "needs input":
+      return t("zones.chips.needsInput");
+    case "stuck":
+      return t("zones.chips.stuck");
+    case "errored":
+      return t("zones.chips.errored");
+    case "waiting":
+      return t("zones.chips.waiting");
+    case "crashed":
+      return t("zones.chips.crashed");
+    case "blocked":
+      return t("zones.chips.blocked");
+    case "ci failed":
+      return t("zones.chips.ciFailed");
+    case "changes":
+      return t("zones.chips.changes");
+    case "conflicts":
+      return t("zones.chips.conflicts");
+    default:
+      return t("zones.chips.action");
+  }
 }

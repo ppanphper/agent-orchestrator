@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { useToast } from "./Toast";
 
 interface CopyDebugBundleButtonProps {
@@ -61,6 +62,7 @@ function scopeObservabilityToProject(observability: unknown, projectId?: string)
  * Copies observability snapshot + page context to the clipboard for GitHub issues / support.
  */
 export function CopyDebugBundleButton({ projectId }: CopyDebugBundleButtonProps) {
+  const { t } = useI18n();
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
 
@@ -70,7 +72,7 @@ export function CopyDebugBundleButton({ projectId }: CopyDebugBundleButtonProps)
     try {
       const res = await fetch("/api/observability", { credentials: "same-origin" });
       if (!res.ok) {
-        showToast("Could not fetch observability snapshot", "error");
+        showToast(t("debug.fetchFailed"), "error");
         return;
       }
       const correlationId = res.headers.get("x-correlation-id");
@@ -79,7 +81,7 @@ export function CopyDebugBundleButton({ projectId }: CopyDebugBundleButtonProps)
       try {
         observabilityRaw = await res.json();
       } catch {
-        showToast("Could not parse observability snapshot", "error");
+        showToast(t("debug.parseFailed"), "error");
         return;
       }
 
@@ -97,13 +99,13 @@ export function CopyDebugBundleButton({ projectId }: CopyDebugBundleButtonProps)
       };
 
       await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
-      showToast("Debug bundle copied to clipboard", "success");
+      showToast(t("debug.copied"), "success");
     } catch {
-      showToast("Could not copy debug bundle", "error");
+      showToast(t("debug.copyFailed"), "error");
     } finally {
       setBusy(false);
     }
-  }, [busy, projectId, showToast]);
+  }, [busy, projectId, showToast, t]);
 
   return (
     <button
@@ -111,8 +113,8 @@ export function CopyDebugBundleButton({ projectId }: CopyDebugBundleButtonProps)
       className="dashboard-app-btn dashboard-app-btn--icon"
       onClick={() => void handleClick()}
       disabled={busy}
-      title="Copy debug bundle"
-      aria-label="Copy debug bundle for issue reports"
+      title={t("debug.copyBundle")}
+      aria-label={t("debug.copyBundleIssue")}
     >
       <svg
         width="12"

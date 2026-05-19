@@ -47,14 +47,14 @@ describe("Global error boundary", () => {
 
     render(<GlobalError error={new Error("layout failed")} reset={reset} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
   it("reloads the page on demand", () => {
     render(<GlobalError error={new Error("layout failed")} reset={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Reload page" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新页面" }));
     expect(window.location.reload).toHaveBeenCalledTimes(1);
   });
 
@@ -63,9 +63,8 @@ describe("Global error boundary", () => {
 
     expect(errorDisplaySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Something broke at the app shell",
-        message:
-          "The dashboard could not recover from this error at the layout level. Try again first, then reload the page if it still fails.",
+        title: "应用外壳出现错误",
+        message: "控制台无法从布局层错误中恢复。请先重试；如果仍失败，再刷新页面。",
       }),
     );
   });

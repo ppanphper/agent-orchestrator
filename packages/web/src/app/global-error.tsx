@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 
 export default function GlobalError({
   error,
@@ -15,17 +16,33 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html lang="en" className="dark">
+    <html lang="zh-CN" className="dark">
       <body className="bg-[var(--color-bg-base)] text-[var(--color-text-primary)] antialiased">
-        <ErrorDisplay
-          title="Something broke at the app shell"
-          message="The dashboard could not recover from this error at the layout level. Try again first, then reload the page if it still fails."
-          tone="error"
-          primaryAction={{ label: "Try again", onClick: reset }}
-          secondaryAction={{ label: "Reload page", onClick: () => window.location.reload() }}
-          error={error}
-        />
+        <I18nProvider locale="zh-CN">
+          <GlobalErrorContent error={error} reset={reset} />
+        </I18nProvider>
       </body>
     </html>
+  );
+}
+
+function GlobalErrorContent({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <ErrorDisplay
+      title={t("errors.globalTitle")}
+      message={t("errors.globalMessage")}
+      tone="error"
+      primaryAction={{ label: t("common.retry"), onClick: reset }}
+      secondaryAction={{ label: t("errors.reloadPage"), onClick: () => window.location.reload() }}
+      error={error}
+    />
   );
 }

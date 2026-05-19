@@ -5,17 +5,14 @@ import { useParams, usePathname, useRouter } from "next/navigation";
 import { isOrchestratorSession } from "@aoagents/ao-core/types";
 import { SessionDetail } from "@/components/SessionDetail";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
-import {
-  type DashboardSession,
-  type ActivityState,
-  getAttentionLevel,
-} from "@/lib/types";
+import { type DashboardSession, type ActivityState, getAttentionLevel } from "@/lib/types";
 import { activityIcon } from "@/lib/activity-icons";
 import type { ProjectInfo } from "@/lib/project-name";
 import { getSessionTitle } from "@/lib/format";
 import { useMuxSessionActivity } from "@/hooks/useMuxSessionActivity";
 import { projectSessionPath } from "@/lib/routes";
 import { fetchJsonWithTimeout } from "@/lib/client-fetch";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 function truncate(s: string, max: number): string {
   const codePoints = Array.from(s);
@@ -75,20 +72,20 @@ function isAbortLikeError(error: unknown): boolean {
   return false;
 }
 
-function getSessionLoadErrorMessage(error: Error): string {
+function getSessionLoadErrorMessage(
+  error: Error,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
   const normalized = error.message.toLowerCase();
-  if (normalized.includes("timed out"))
-    return "The session request is taking too long. You can retry, or return to the project and reopen a different session.";
-  if (normalized.includes("network"))
-    return "The session request failed before the dashboard got a response. Check the local server connection and try again.";
-  if (normalized.includes("404"))
-    return "This session is no longer available. It may have been removed while the page was open.";
-  if (normalized.includes("500"))
-    return "The server returned an internal error while loading this session. Try again to re-fetch the latest state.";
-  return "The dashboard could not load this session cleanly. Try again to re-fetch the latest state.";
+  if (normalized.includes("timed out")) return t("session.loadTimeout");
+  if (normalized.includes("network")) return t("session.loadNetworkLocal");
+  if (normalized.includes("404")) return t("session.loadMissing");
+  if (normalized.includes("500")) return t("session.loadServer");
+  return t("session.loadGeneric");
 }
 
 function LoadingContent() {
+  const { t } = useI18n();
   return (
     <div className="flex h-full min-h-screen items-center justify-center bg-[var(--color-bg-base)]">
       <div className="flex flex-col items-center gap-3">
@@ -101,13 +98,16 @@ function LoadingContent() {
         >
           <path d="M12 3a9 9 0 1 0 9 9" />
         </svg>
-        <div className="text-[13px] text-[var(--color-text-tertiary)]">Loading session…</div>
+        <div className="text-[13px] text-[var(--color-text-tertiary)]">
+          {t("session.loadingSession")}
+        </div>
       </div>
     </div>
   );
 }
 
 export default function ProjectSessionPage() {
+  const { t } = useI18n();
   const params = useParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -373,21 +373,26 @@ export default function ProjectSessionPage() {
     };
   }, []);
 
-  if (loading) return <div className="dashboard-main--desktop"><LoadingContent /></div>;
+  if (loading)
+    return (
+      <div className="dashboard-main--desktop">
+        <LoadingContent />
+      </div>
+    );
 
   if (sessionMissing) {
     return (
       <div className="dashboard-main--desktop">
         <div className="flex h-full items-center justify-center">
           <ErrorDisplay
-            title="Session not found"
-            message="This session is no longer available. It may have been removed, renamed, or already cleaned up."
+            title={t("session.notFoundTitle")}
+            message={t("session.notFoundMessage")}
             tone="not-found"
             primaryAction={{
-              label: "Back to dashboard",
+              label: t("common.backToDashboard"),
               href: expectedProjectId ? `/projects/${expectedProjectId}` : "/",
             }}
-            secondaryAction={{ label: "Retry", onClick: () => void fetchSession() }}
+            secondaryAction={{ label: t("common.retry"), onClick: () => void fetchSession() }}
             compact
             chrome="card"
           />
@@ -401,11 +406,11 @@ export default function ProjectSessionPage() {
       <div className="dashboard-main--desktop">
         <div className="flex h-full items-center justify-center">
           <ErrorDisplay
-            title="Failed to load session"
-            message={getSessionLoadErrorMessage(routeError)}
+            title={t("session.loadFailedTitle")}
+            message={getSessionLoadErrorMessage(routeError, t)}
             tone="error"
             primaryAction={{
-              label: "Try again",
+              label: t("common.retry"),
               onClick: () => {
                 setRouteError(null);
                 setSessionMissing(false);
@@ -414,7 +419,7 @@ export default function ProjectSessionPage() {
               },
             }}
             secondaryAction={{
-              label: "Back to dashboard",
+              label: t("common.backToDashboard"),
               href: session?.projectId ? `/projects/${session.projectId}` : "/",
             }}
             error={routeError}
@@ -431,12 +436,12 @@ export default function ProjectSessionPage() {
       <div className="dashboard-main--desktop">
         <div className="flex h-full items-center justify-center">
           <ErrorDisplay
-            title="Session unavailable"
-            message="The backend has not returned this session yet. This can happen right after spawning an orchestrator; retry once the terminal registers the session."
+            title={t("session.unavailableTitle")}
+            message={t("session.unavailableMessage")}
             tone="error"
-            primaryAction={{ label: "Retry", onClick: () => void fetchSession() }}
+            primaryAction={{ label: t("common.retry"), onClick: () => void fetchSession() }}
             secondaryAction={{
-              label: "Back to dashboard",
+              label: t("common.backToDashboard"),
               href: expectedProjectId ? `/projects/${expectedProjectId}` : "/",
             }}
             compact
