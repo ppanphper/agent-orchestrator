@@ -49,7 +49,29 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
     [issues, projectId],
   );
 
-  const refresh = useCallback(async () => {
+  const applyPoller = useCallback((data: BacklogResponse | null) => {
+    setPollerPaused(data?.poller?.paused === true);
+    setMaxConcurrent(data?.poller?.maxConcurrent ?? 5);
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", projectId }),
+      });
+      const data = (await response.json().catch(() => null)) as BacklogResponse | null;
+      if (!response.ok) {
+        throw new Error(data?.error ?? t("backlog.requestFailed", { status: response.status }));
+      }
+      applyPoller(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("backlog.loadFailed"));
+    }
+  }, [applyPoller, projectId, t]);
+
+  const refreshIssues = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -61,15 +83,19 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         throw new Error(data?.error ?? t("backlog.requestFailed", { status: response.status }));
       }
       setIssues(data?.issues ?? []);
-      setPollerPaused(data?.poller?.paused === true);
-      setMaxConcurrent(data?.poller?.maxConcurrent ?? 5);
+      applyPoller(data);
       setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("backlog.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [projectId, t]);
+  }, [applyPoller, projectId, t]);
+
+  const refresh = useCallback(async () => {
+    await refreshStatus();
+    await refreshIssues();
+  }, [refreshIssues, refreshStatus]);
 
   const setPoller = useCallback(
     async (action: "start" | "stop") => {
@@ -87,15 +113,15 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
             data?.error ?? t("backlog.actionFailed", { action, status: response.status }),
           );
         }
-        setPollerPaused(data?.poller?.paused === true);
-        await refresh();
+        applyPoller(data);
+        void refreshIssues();
       } catch (err) {
         setError(err instanceof Error ? err.message : t("backlog.pollerActionFailed", { action }));
       } finally {
         setLoading(false);
       }
     },
-    [refresh],
+    [applyPoller, projectId, refreshIssues, t],
   );
 
   const claimNow = useCallback(async () => {
@@ -112,15 +138,14 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         throw new Error(data?.error ?? t("backlog.claimFailed", { status: response.status }));
       }
       setIssues(data?.issues ?? []);
-      setPollerPaused(data?.poller?.paused === true);
-      setMaxConcurrent(data?.poller?.maxConcurrent ?? maxConcurrent);
+      applyPoller(data);
       setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("backlog.claimIssueFailed"));
     } finally {
       setClaiming(false);
     }
-  }, [maxConcurrent, t]);
+  }, [applyPoller, projectId, t]);
 
   const saveMaxConcurrent = useCallback(
     async (nextMaxConcurrent: number) => {
@@ -156,8 +181,9 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
   );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshStatus();
+    void refreshIssues();
+  }, [refreshIssues, refreshStatus]);
 
   const setupLabels = useCallback(async () => {
     setSetupLoading(true);

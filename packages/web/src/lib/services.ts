@@ -587,12 +587,15 @@ async function pollBacklogOnce(projectIds?: string[], ignorePaused = false): Pro
   }
 }
 
-/** Get backlog issues across all projects (for dashboard display). */
-export async function getBacklogIssues(): Promise<Array<Issue & { projectId: string }>> {
+/** Get backlog issues for one project or across all projects. */
+export async function getBacklogIssues(
+  projectIdFilter?: string,
+): Promise<Array<Issue & { projectId: string }>> {
   const results: Array<Issue & { projectId: string }> = [];
   try {
     const { config, registry } = await getServices();
     for (const [projectId, project] of Object.entries(config.projects)) {
+      if (projectIdFilter && projectId !== projectIdFilter) continue;
       if (!project.tracker?.plugin) continue;
       const tracker = registry.get<Tracker>("tracker", project.tracker.plugin);
       if (!tracker?.listIssues) continue;

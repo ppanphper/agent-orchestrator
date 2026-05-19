@@ -16,33 +16,45 @@ describe("BacklogPanel", () => {
   });
 
   it("loads project backlog issues on mount", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        poller: { running: true, paused: false, maxConcurrent: 7 },
-        issues: [
-          {
-            projectId: "app",
-            id: "42",
-            title: "Fix upload progress",
-            url: "https://github.com/acme/app/issues/42",
-            labels: ["agent:backlog"],
-          },
-          {
-            projectId: "other",
-            id: "9",
-            title: "Other project",
-            labels: ["agent:backlog"],
-          },
-        ],
-      }),
-    } as Response);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 7 },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 7 },
+          issues: [
+            {
+              projectId: "app",
+              id: "42",
+              title: "Fix upload progress",
+              url: "https://github.com/acme/app/issues/42",
+              labels: ["agent:backlog"],
+            },
+            {
+              projectId: "other",
+              id: "9",
+              title: "Other project",
+              labels: ["agent:backlog"],
+            },
+          ],
+        }),
+      } as Response);
 
     render(<BacklogPanel projectId="app" />);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/backlog?projectId=app", { cache: "no-store" }),
-    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status", projectId: "app" }),
+      });
+      expect(fetchMock).toHaveBeenCalledWith("/api/backlog?projectId=app", { cache: "no-store" });
+    });
     expect(await screen.findByText("Fix upload progress")).toBeInTheDocument();
     expect(screen.queryByText("Other project")).not.toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Max concurrent backlog agents" })).toHaveValue(
@@ -52,6 +64,12 @@ describe("BacklogPanel", () => {
 
   it("can request label setup", async () => {
     fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -77,6 +95,12 @@ describe("BacklogPanel", () => {
 
   it("can pause the backlog poller", async () => {
     fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -116,6 +140,12 @@ describe("BacklogPanel", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
+          poller: { running: false, paused: true, maxConcurrent: 5 },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
           issues: [],
           poller: { running: false, paused: true, maxConcurrent: 5 },
         }),
@@ -143,6 +173,12 @@ describe("BacklogPanel", () => {
 
   it("can update the backlog concurrency limit", async () => {
     fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -178,13 +214,20 @@ describe("BacklogPanel", () => {
   });
 
   it("renders backlog controls in Chinese locale", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        issues: [],
-        poller: { running: true, paused: false, maxConcurrent: 5 },
-      }),
-    } as Response);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          issues: [],
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response);
 
     render(
       <I18nProvider locale="zh-CN">

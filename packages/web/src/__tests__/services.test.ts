@@ -427,6 +427,60 @@ describe("pollBacklog", () => {
     });
   });
 
+  it("fetches backlog issues for only the requested project", async () => {
+    mockLoadConfig.mockReturnValue({
+      configPath: "/tmp/agent-orchestrator.yaml",
+      port: 3000,
+      readyThresholdMs: 300_000,
+      defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
+      projects: {
+        "test-project": {
+          path: "/tmp/test-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+        "other-project": {
+          path: "/tmp/other-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+      },
+      notifiers: {},
+      notificationRouting: { urgent: [], action: [], warning: [], info: [] },
+      reactions: {},
+    });
+    mockListIssues.mockResolvedValue([
+      {
+        id: "123",
+        title: "Test Issue",
+        description: "Test description",
+        url: "https://github.com/test/test/issues/123",
+        state: "open",
+        labels: ["agent:backlog"],
+      },
+    ]);
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+        };
+      }
+      return null;
+    });
+
+    const { getBacklogIssues } = await import("../lib/services");
+    const issues = await getBacklogIssues("test-project");
+
+    expect(issues).toEqual([expect.objectContaining({ id: "123", projectId: "test-project" })]);
+    expect(mockListIssues).toHaveBeenCalledTimes(1);
+    expect(mockListIssues).toHaveBeenCalledWith(
+      { state: "open", labels: ["agent:backlog"], limit: 20 },
+      expect.objectContaining({ path: "/tmp/test-project" }),
+    );
+  });
+
   it("respects the configured max concurrent backlog agents", async () => {
     mockCreateSessionManager.mockReturnValue({
       spawn: mockSpawn,

@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get("projectId") ?? undefined;
   try {
-    const issues = await getBacklogIssues();
+    const issues = await getBacklogIssues(projectId);
     return NextResponse.json({ issues, poller: getBacklogPollerStatus(projectId) });
   } catch (err) {
     return NextResponse.json(
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   if (action === "claim-now") {
     await claimBacklogNow(projectId);
-    const issues = await getBacklogIssues();
+    const issues = await getBacklogIssues(projectId);
     return NextResponse.json({ issues, poller: getBacklogPollerStatus(projectId) });
   }
 
