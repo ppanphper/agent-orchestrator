@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getServices } from "@/lib/services";
+import { getServices, startBacklogPoller } from "@/lib/services";
 import { validateString, validateConfiguredProject } from "@/lib/validation";
 import type { Tracker } from "@aoagents/ao-core";
 
@@ -17,7 +17,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const { config, registry } = await getServices();
-    const allIssues: Array<{ projectId: string; id: string; title: string; url: string; state: string; labels: string[] }> = [];
+    const allIssues: Array<{
+      projectId: string;
+      id: string;
+      title: string;
+      url: string;
+      state: string;
+      labels: string[];
+    }> = [];
 
     for (const [projectId, project] of Object.entries(config.projects)) {
       if (projectFilter && projectId !== projectFilter) continue;
@@ -77,12 +84,18 @@ export async function POST(request: NextRequest) {
     const project = config.projects[projectId];
 
     if (!project.tracker?.plugin) {
-      return NextResponse.json({ error: "No tracker configured for this project" }, { status: 422 });
+      return NextResponse.json(
+        { error: "No tracker configured for this project" },
+        { status: 422 },
+      );
     }
 
     const tracker = registry.get<Tracker>("tracker", project.tracker.plugin);
     if (!tracker?.createIssue) {
-      return NextResponse.json({ error: "Tracker does not support issue creation" }, { status: 422 });
+      return NextResponse.json(
+        { error: "Tracker does not support issue creation" },
+        { status: 422 },
+      );
     }
 
     const labels = body.addToBacklog ? ["agent:backlog"] : [];
@@ -94,6 +107,10 @@ export async function POST(request: NextRequest) {
       },
       project,
     );
+
+    if (body.addToBacklog) {
+      startBacklogPoller();
+    }
 
     return NextResponse.json({ issue: { projectId, ...issue } }, { status: 201 });
   } catch (err) {

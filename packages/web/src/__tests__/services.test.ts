@@ -1,4 +1,7 @@
+import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const BACKLOG_STATE_PATH = "/tmp/backlog-poller.json";
 
 const {
   mockLoadConfig,
@@ -64,6 +67,7 @@ vi.mock("@aoagents/ao-core", () => ({
     getStates: vi.fn(),
     check: vi.fn(),
   }),
+  isOrchestratorSession: () => false,
   TERMINAL_STATUSES: new Set(["merged", "killed"]) as ReadonlySet<string>,
 }));
 
@@ -97,11 +101,21 @@ describe("services", () => {
     mockCreateSessionManager.mockReturnValue({});
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
+    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
+    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
+    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
+      ._aoBacklogPollInFlight;
+    rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   afterEach(() => {
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
+    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
+    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
+    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
+      ._aoBacklogPollInFlight;
+    rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   it("registers the OpenCode agent plugin with web services", async () => {
@@ -204,11 +218,21 @@ describe("pollBacklog", () => {
 
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
+    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
+    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
+    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
+      ._aoBacklogPollInFlight;
+    rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   afterEach(() => {
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
+    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
+    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
+    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
+      ._aoBacklogPollInFlight;
+    rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   it("removes agent:backlog label when claiming an issue", async () => {
@@ -254,6 +278,130 @@ describe("pollBacklog", () => {
         comment: "Claimed by agent orchestrator — session spawned.",
       },
       expect.objectContaining({ tracker: { plugin: "github" } }),
+    );
+  });
+
+  it("does not claim issues while the backlog poller is paused", async () => {
+    mockListIssues.mockResolvedValue([
+      {
+        id: "123",
+        title: "Test Issue",
+        description: "Test description",
+        url: "https://github.com/test/test/issues/123",
+        state: "open",
+        labels: ["agent:backlog"],
+      },
+    ]);
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { pollBacklog, stopBacklogPoller } = await import("../lib/services");
+    stopBacklogPoller();
+    await pollBacklog();
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockUpdateIssue).not.toHaveBeenCalled();
+  });
+
+  it("allows a manual claim cycle while the backlog poller is paused", async () => {
+    mockListIssues.mockResolvedValue([
+      {
+        id: "123",
+        title: "Test Issue",
+        description: "Test description",
+        url: "https://github.com/test/test/issues/123",
+        state: "open",
+        labels: ["agent:backlog"],
+      },
+    ]);
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { claimBacklogNow, stopBacklogPoller } = await import("../lib/services");
+    stopBacklogPoller();
+    await claimBacklogNow();
+
+    expect(mockSpawn).toHaveBeenCalledWith({ projectId: "test-project", issueId: "123" });
+    expect(mockUpdateIssue).toHaveBeenCalledWith(
+      "123",
+      expect.objectContaining({
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:backlog"],
+      }),
+      expect.objectContaining({ tracker: { plugin: "github" } }),
+    );
+  });
+
+  it("respects the configured max concurrent backlog agents", async () => {
+    mockCreateSessionManager.mockReturnValue({
+      spawn: mockSpawn,
+      list: vi.fn().mockResolvedValue([
+        {
+          id: "session-1",
+          projectId: "test-project",
+          status: "running",
+          lifecycle: { pr: { state: "none" } },
+        },
+        {
+          id: "session-2",
+          projectId: "test-project",
+          status: "running",
+          lifecycle: { pr: { state: "none" } },
+        },
+      ]),
+    });
+    mockListIssues.mockResolvedValue([
+      {
+        id: "123",
+        title: "Test Issue",
+        description: "Test description",
+        url: "https://github.com/test/test/issues/123",
+        state: "open",
+        labels: ["agent:backlog"],
+      },
+    ]);
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    const { claimBacklogNow, setBacklogMaxConcurrent } = await import("../lib/services");
+    setBacklogMaxConcurrent(2);
+    await claimBacklogNow();
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockUpdateIssue).not.toHaveBeenCalledWith(
+      "123",
+      expect.objectContaining({
+        labels: ["agent:in-progress"],
+        removeLabels: ["agent:backlog"],
+      }),
+      expect.anything(),
     );
   });
 });

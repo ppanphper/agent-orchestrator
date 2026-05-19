@@ -12,6 +12,8 @@ import "server-only";
  * bundle them correctly.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   getGlobalConfigPath,
   loadConfig,
@@ -155,21 +157,127 @@ function loadDashboardConfig(): LoadedConfig {
 
 const BACKLOG_LABEL = "agent:backlog";
 const BACKLOG_POLL_INTERVAL = 60_000; // 1 minute
-const MAX_CONCURRENT_AGENTS = 5; // Max active agent sessions across all projects
+const DEFAULT_MAX_CONCURRENT_AGENTS = 5; // Max active agent sessions across all projects
 
 const globalForBacklog = globalThis as typeof globalThis & {
   _aoBacklogStarted?: boolean;
   _aoBacklogTimer?: ReturnType<typeof setInterval>;
+  _aoBacklogPollInFlight?: Promise<void>;
+  _aoBacklogClaimingIssues?: Set<string>;
 };
+
+interface BacklogPollerState {
+  paused: boolean;
+  maxConcurrent?: number;
+  updatedAt?: string;
+}
+
+export interface BacklogPollerStatus {
+  running: boolean;
+  paused: boolean;
+  maxConcurrent: number;
+}
+
+function backlogPollerStatePath(): string {
+  try {
+    const configPath = getGlobalConfigPath();
+    return join(dirname(configPath), "backlog-poller.json");
+  } catch {
+    return join(process.cwd(), ".agent-orchestrator-backlog-poller.json");
+  }
+}
+
+function readBacklogPollerState(): BacklogPollerState {
+  try {
+    const statePath = backlogPollerStatePath();
+    if (!existsSync(statePath))
+      return { paused: false, maxConcurrent: DEFAULT_MAX_CONCURRENT_AGENTS };
+    const raw = JSON.parse(readFileSync(statePath, "utf8")) as Partial<BacklogPollerState>;
+    return {
+      paused: raw.paused === true,
+      maxConcurrent: normalizeMaxConcurrent(raw.maxConcurrent),
+      updatedAt: raw.updatedAt,
+    };
+  } catch {
+    return { paused: false, maxConcurrent: DEFAULT_MAX_CONCURRENT_AGENTS };
+  }
+}
+
+function writeBacklogPollerState(state: BacklogPollerState): void {
+  const statePath = backlogPollerStatePath();
+  mkdirSync(dirname(statePath), { recursive: true });
+  writeFileSync(
+    statePath,
+    JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2),
+    "utf8",
+  );
+}
+
+function updateBacklogPollerState(patch: Partial<BacklogPollerState>): BacklogPollerState {
+  const next = { ...readBacklogPollerState(), ...patch };
+  writeBacklogPollerState(next);
+  return readBacklogPollerState();
+}
+
+function normalizeMaxConcurrent(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) return DEFAULT_MAX_CONCURRENT_AGENTS;
+  return Math.max(1, Math.min(value, 50));
+}
+
+/** Return current backlog poller state. */
+export function getBacklogPollerStatus(): BacklogPollerStatus {
+  const state = readBacklogPollerState();
+  return {
+    running: globalForBacklog._aoBacklogStarted === true,
+    paused: state.paused,
+    maxConcurrent: state.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_AGENTS,
+  };
+}
+
+/** Update the global backlog concurrency cap used by automatic and manual claiming. */
+export function setBacklogMaxConcurrent(maxConcurrent: number): BacklogPollerStatus {
+  updateBacklogPollerState({ maxConcurrent: normalizeMaxConcurrent(maxConcurrent) });
+  return getBacklogPollerStatus();
+}
 
 /** Start the backlog auto-claim loop. Idempotent — safe to call multiple times. */
 export function startBacklogPoller(): void {
+  if (readBacklogPollerState().paused) return;
   if (globalForBacklog._aoBacklogStarted) return;
   globalForBacklog._aoBacklogStarted = true;
 
   // Run immediately, then on interval
   void pollBacklog();
   globalForBacklog._aoBacklogTimer = setInterval(() => void pollBacklog(), BACKLOG_POLL_INTERVAL);
+}
+
+/** Pause auto-claiming and clear the polling interval. */
+export function stopBacklogPoller(): BacklogPollerStatus {
+  if (globalForBacklog._aoBacklogTimer) {
+    clearInterval(globalForBacklog._aoBacklogTimer);
+    globalForBacklog._aoBacklogTimer = undefined;
+  }
+  globalForBacklog._aoBacklogStarted = false;
+  updateBacklogPollerState({ paused: true });
+  return getBacklogPollerStatus();
+}
+
+/** Resume auto-claiming and start the polling interval. */
+export function resumeBacklogPoller(): BacklogPollerStatus {
+  updateBacklogPollerState({ paused: false });
+  startBacklogPoller();
+  return getBacklogPollerStatus();
+}
+
+function getBacklogClaimingIssues(): Set<string> {
+  if (!globalForBacklog._aoBacklogClaimingIssues) {
+    globalForBacklog._aoBacklogClaimingIssues = new Set();
+  }
+  return globalForBacklog._aoBacklogClaimingIssues;
+}
+
+function backlogIssueKey(projectId: string, issueId: string): string {
+  return `${projectId}:${issueId.toLowerCase()}`;
 }
 
 // Track which issues we've already processed to avoid repeated API calls
@@ -267,7 +375,34 @@ async function relabelReopenedIssues(
   }
 }
 
-export async function pollBacklog(): Promise<void> {
+export function pollBacklog(): Promise<void> {
+  if (readBacklogPollerState().paused) {
+    return Promise.resolve();
+  }
+  return runBacklogClaimCycle();
+}
+
+/** Run one manual backlog claim cycle even when automatic polling is paused. */
+export function claimBacklogNow(): Promise<void> {
+  return runBacklogClaimCycle();
+}
+
+function runBacklogClaimCycle(): Promise<void> {
+  if (globalForBacklog._aoBacklogPollInFlight) {
+    return globalForBacklog._aoBacklogPollInFlight;
+  }
+
+  const pollPromise = pollBacklogOnce().finally(() => {
+    if (globalForBacklog._aoBacklogPollInFlight === pollPromise) {
+      globalForBacklog._aoBacklogPollInFlight = undefined;
+    }
+  });
+
+  globalForBacklog._aoBacklogPollInFlight = pollPromise;
+  return pollPromise;
+}
+
+async function pollBacklogOnce(): Promise<void> {
   try {
     const { config, registry, sessionManager } = await getServices();
 
@@ -292,12 +427,16 @@ export async function pollBacklog(): Promise<void> {
     );
     const activeIssueIds = new Set(
       workerSessions
-        .map((session) => session.issueId?.toLowerCase())
+        .map((session) =>
+          session.issueId ? backlogIssueKey(session.projectId, session.issueId) : null,
+        )
         .filter((issueId): issueId is string => Boolean(issueId)),
     );
+    const claimingIssueIds = getBacklogClaimingIssues();
 
     // Auto-scaling: respect max concurrent agents
-    let availableSlots = MAX_CONCURRENT_AGENTS - workerSessions.length;
+    const maxConcurrent = getBacklogPollerStatus().maxConcurrent;
+    let availableSlots = maxConcurrent - workerSessions.length;
     if (availableSlots <= 0) return; // At capacity
 
     for (const [projectId, project] of Object.entries(config.projects)) {
@@ -320,14 +459,17 @@ export async function pollBacklog(): Promise<void> {
       for (const issue of backlogIssues) {
         if (availableSlots <= 0) break;
 
-        // Skip if already being worked on
-        if (activeIssueIds.has(issue.id.toLowerCase())) continue;
+        const issueKey = backlogIssueKey(projectId, issue.id);
 
+        // Skip if already being worked on or claimed by an in-flight spawn.
+        if (activeIssueIds.has(issueKey) || claimingIssueIds.has(issueKey)) continue;
+
+        claimingIssueIds.add(issueKey);
         try {
           await sessionManager.spawn({ projectId, issueId: issue.id });
           availableSlots--;
 
-          activeIssueIds.add(issue.id.toLowerCase());
+          activeIssueIds.add(issueKey);
 
           // Mark as claimed on the tracker
           if (tracker.updateIssue) {
@@ -343,6 +485,8 @@ export async function pollBacklog(): Promise<void> {
           }
         } catch (err) {
           console.error(`[backlog] Failed to spawn session for issue ${issue.id}:`, err);
+        } finally {
+          claimingIssueIds.delete(issueKey);
         }
       }
     }

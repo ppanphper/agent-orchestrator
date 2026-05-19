@@ -18,6 +18,7 @@ import { registerMigrateStorage } from "./commands/migrate-storage.js";
 import { registerCompletion } from "./commands/completion.js";
 import { registerEvents } from "./commands/events.js";
 import { registerConfig } from "./commands/config.js";
+import { registerBacklog } from "./commands/backlog.js";
 import { getConfigInstruction } from "./lib/config-instruction.js";
 import { getCliVersion } from "./options/version.js";
 
@@ -51,6 +52,7 @@ export function createProgram(): Command {
   registerCompletion(program);
   registerEvents(program);
   registerConfig(program);
+  registerBacklog(program);
 
   program
     .command("config-help")
