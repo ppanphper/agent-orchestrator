@@ -5,8 +5,7 @@ import { type DashboardSession, type AttentionLevel, isPRMergeReady } from "@/li
 import { SessionCard } from "./SessionCard";
 import { getSessionTitle } from "@/lib/format";
 import { projectSessionPath } from "@/lib/routes";
-import { useI18n } from "@/lib/i18n";
-import type { TranslationKey } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 interface AttentionZoneProps {
   level: AttentionLevel;

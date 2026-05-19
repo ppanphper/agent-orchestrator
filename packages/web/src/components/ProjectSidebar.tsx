@@ -13,8 +13,7 @@ import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { ThemeToggle } from "./ThemeToggle";
 import { AddProjectModal } from "./AddProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
-import { useI18n } from "@/lib/i18n";
-import type { Locale } from "@/lib/i18n";
+import { useI18n, type Locale } from "@/lib/i18n";
 
 /** Minimal shape needed to render an orchestrator link in the sidebar. */
 export interface ProjectSidebarOrchestrator {
