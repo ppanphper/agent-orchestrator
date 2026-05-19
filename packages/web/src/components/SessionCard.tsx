@@ -19,7 +19,7 @@ import { getSessionTitle } from "@/lib/format";
 import { CICheckList } from "./CIBadge";
 import { getSizeLabel } from "./PRStatus";
 import { projectSessionHashPath, projectSessionPath } from "@/lib/routes";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 /**
  * Tracks which session IDs have already played their entrance animation.
@@ -212,7 +212,7 @@ function SessionCardView({ session, onSend, onKill, onMerge, onRestore }: Sessio
 
   const rateLimited = pr ? isPRRateLimited(pr) : false;
   const prUnenriched = pr ? isPRUnenriched(pr) : false;
-  const alerts = getAlerts(session);
+  const alerts = getAlerts(session, t);
   const isReadyToMerge = !rateLimited && pr?.mergeability.mergeable && pr.state === "open";
   const isTerminal = isDashboardSessionTerminal(session);
   const isRestorable = isDashboardSessionRestorable(session);
@@ -927,7 +927,10 @@ interface Alert {
   actionMessage?: string;
 }
 
-function getAlerts(session: DashboardSession): Alert[] {
+function getAlerts(
+  session: DashboardSession,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): Alert[] {
   const pr = session.pr;
   if (!pr || pr.state !== "open") return [];
   if (isPRRateLimited(pr)) return [];
@@ -961,10 +964,10 @@ function getAlerts(session: DashboardSession): Alert[] {
         key: "ci-fail",
         type: "ci",
         icon: "\u2717",
-        label: "CI failing",
+        label: t("session.ciFailing"),
         url: pr.url + "/checks",
         notified: Boolean(meta["lastCIFailureDispatchHash"]),
-        actionLabel: "Ask to fix",
+        actionLabel: t("session.askToFix"),
         actionMessage: `Please fix the failing CI checks on ${pr.url}`,
       });
     } else if (failCount === 0) {
@@ -972,7 +975,7 @@ function getAlerts(session: DashboardSession): Alert[] {
         key: "ci-unknown",
         type: "ci",
         icon: "?",
-        label: "CI unknown",
+        label: t("session.ciUnknown"),
         url: pr.url + "/checks",
       });
     } else {
@@ -981,10 +984,10 @@ function getAlerts(session: DashboardSession): Alert[] {
         type: "ci",
         icon: "\u2717",
         count: failCount,
-        label: `check${failCount > 1 ? "s" : ""} failing`,
+        label: t("session.checksFailingShort", { plural: failCount > 1 ? "s" : "" }),
         url: failedCheck?.url ?? pr.url + "/checks",
         notified: Boolean(meta["lastCIFailureDispatchHash"]),
-        actionLabel: "Ask to fix",
+        actionLabel: t("session.askToFix"),
         actionMessage: `Please fix the failing CI checks on ${pr.url}`,
       });
     }
@@ -995,10 +998,10 @@ function getAlerts(session: DashboardSession): Alert[] {
       key: "changes",
       type: "changes",
       icon: "\u21BB",
-      label: "changes requested",
+      label: t("session.changesRequested"),
       url: pr.url,
       notified: Boolean(meta["lastPendingReviewDispatchHash"]),
-      actionLabel: "Ask to address",
+      actionLabel: t("session.askToAddress"),
       actionMessage: `Please address the requested changes on ${pr.url}`,
     });
   } else if (!pr.isDraft && (pr.reviewDecision === "pending" || pr.reviewDecision === "none")) {
@@ -1020,9 +1023,9 @@ function getAlerts(session: DashboardSession): Alert[] {
           <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       ),
-      label: "needs review",
+      label: t("session.needsReviewShort"),
       url: pr.url,
-      actionLabel: "Ask to post",
+      actionLabel: t("session.askToPost"),
       actionMessage: `Post ${pr.url} on slack asking for a review.`,
     });
   }
@@ -1032,10 +1035,10 @@ function getAlerts(session: DashboardSession): Alert[] {
       key: "conflict",
       type: "conflict",
       icon: "\u26A0",
-      label: "merge conflict",
+      label: t("session.mergeConflict"),
       url: pr.url,
       notified: meta["lastMergeConflictDispatched"] === "true",
-      actionLabel: "Ask to fix",
+      actionLabel: t("session.askToFix"),
       actionMessage: `Please resolve the merge conflicts on ${pr.url} by rebasing on the base branch`,
     });
   }
@@ -1046,10 +1049,10 @@ function getAlerts(session: DashboardSession): Alert[] {
       key: "comments",
       type: "comment",
       icon: "\uD83D\uDCAC",
-      label: "unresolved comments",
+      label: t("session.unresolvedCommentsShort"),
       count: pr.unresolvedThreads,
       url: firstUrl,
-      actionLabel: "Ask to resolve",
+      actionLabel: t("session.askToResolve"),
       actionMessage: `Please address all unresolved review comments on ${pr.url}`,
     });
   }

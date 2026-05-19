@@ -10,6 +10,7 @@ import {
 } from "@/lib/types";
 import dynamic from "next/dynamic";
 import { getSessionTitle } from "@/lib/format";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import type { ProjectInfo } from "@/lib/project-name";
 import { useSidebarContext } from "./workspace/SidebarContext";
 import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
@@ -33,6 +34,25 @@ const DirectTerminal = dynamic(
   },
 );
 
+function activityLabelKey(activity: string | null | undefined): TranslationKey {
+  switch (activity) {
+    case "active":
+      return "session.active";
+    case "ready":
+      return "session.ready";
+    case "idle":
+      return "session.idle";
+    case "waiting_input":
+      return "session.waitingInput";
+    case "blocked":
+      return "session.blocked";
+    case "exited":
+      return "session.exited";
+    default:
+      return "session.unknownActivity";
+  }
+}
+
 interface SessionDetailProps {
   session: DashboardSession;
   isOrchestrator?: boolean;
@@ -48,6 +68,7 @@ export function SessionDetail({
   projectOrchestratorId = null,
   projects = [],
 }: SessionDetailProps) {
+  const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
@@ -61,6 +82,11 @@ export function SessionDetail({
   const activity = (session.activity && sessionActivityMeta[session.activity]) ?? {
     label: session.activity ?? "unknown",
     color: "var(--color-text-muted)",
+  };
+  const localizedActivity = {
+    ...activity,
+    classLabel: activity.label,
+    label: t(activityLabelKey(session.activity)),
   };
   const headline = getSessionTitle(session);
 
@@ -109,9 +135,7 @@ export function SessionDetail({
   }, [session.id]);
 
   const handleRelaunchClean = useCallback(async () => {
-    const confirmed = window.confirm(
-      "This will discard the current orchestrator's conversation and state. Continue?",
-    );
+    const confirmed = window.confirm(t("session.relaunchConfirm"));
     if (!confirmed) return;
     setRelaunchError(null);
     try {
@@ -143,11 +167,11 @@ export function SessionDetail({
       const newId = data.orchestrator?.id ?? session.id;
       window.location.href = projectSessionPath(session.projectId, newId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to relaunch orchestrator";
+      const message = err instanceof Error ? err.message : t("session.relaunchFailedFallback");
       console.error("Failed to relaunch orchestrator:", err);
       setRelaunchError(message);
     }
-  }, [session.id, session.projectId]);
+  }, [session.id, session.projectId, t]);
 
   const orchestratorHref = useMemo(() => {
     if (isOrchestrator) return null;
@@ -171,7 +195,7 @@ export function SessionDetail({
         isMobile={isMobile}
         terminalEnded={terminalEnded}
         isRestorable={isRestorable}
-        activity={activity}
+        activity={localizedActivity}
         headline={headline}
         projects={projects}
         orchestratorHref={orchestratorHref}
@@ -190,17 +214,16 @@ export function SessionDetail({
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <span className="font-semibold">Relaunch failed:</span> {relaunchError}
+                <span className="font-semibold">{t("session.relaunchFailed")}</span> {relaunchError}
                 <div className="mt-1 text-[var(--color-text-secondary)]">
-                  The previous orchestrator may already be terminated. Try again from the
-                  project dashboard.
+                  {t("session.relaunchFailedHint")}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setRelaunchError(null)}
                 className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                aria-label="Dismiss"
+                aria-label={t("common.dismiss")}
               >
                 ×
               </button>
@@ -234,7 +257,7 @@ export function SessionDetail({
         </div>
       </main>
       <MobileBottomNav
-        ariaLabel="Session navigation"
+        ariaLabel={t("nav.sessionNavigation")}
         activeTab={isOrchestrator ? "orchestrator" : undefined}
         dashboardHref={dashboardHref}
         prsHref={

@@ -2,6 +2,7 @@
 
 import type { DashboardPR, DashboardSession } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/format";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 
 interface SessionEndedSummaryProps {
   session: DashboardSession;
@@ -10,21 +11,27 @@ interface SessionEndedSummaryProps {
   dashboardHref: string;
 }
 
-function formatEndedTime(isoDate: string | null | undefined): string {
-  if (!isoDate) return "Unknown";
+function formatEndedTime(
+  isoDate: string | null | undefined,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  if (!isoDate) return t("session.unknown");
   const timestamp = new Date(isoDate).getTime();
-  if (!Number.isFinite(timestamp)) return "Unknown";
+  if (!Number.isFinite(timestamp)) return t("session.unknown");
   return formatRelativeTime(timestamp);
 }
 
-function getEndedSessionReason(session: DashboardSession): string {
+function getEndedSessionReason(
+  session: DashboardSession,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
   if (session.lifecycle?.runtime.reasonLabel) {
     return session.lifecycle.runtime.reasonLabel;
   }
-  if (session.status === "killed") return "Manually stopped";
-  if (session.status === "terminated") return "Runtime unavailable";
-  if (session.status === "done" || session.status === "merged") return "Work completed";
-  return "Terminal ended";
+  if (session.status === "killed") return t("session.manuallyStopped");
+  if (session.status === "terminated") return t("session.runtimeUnavailable");
+  if (session.status === "done" || session.status === "merged") return t("session.workCompleted");
+  return t("session.terminalEnded");
 }
 
 function getEndedSessionSummary(session: DashboardSession, headline: string): string {
@@ -43,28 +50,29 @@ export function SessionEndedSummary({
   pr,
   dashboardHref,
 }: SessionEndedSummaryProps) {
-  const reason = getEndedSessionReason(session);
+  const { t } = useI18n();
+  const reason = getEndedSessionReason(session, t);
   const summary = getEndedSessionSummary(session, headline);
   const endedAt =
     session.lifecycle?.session.terminatedAt ??
     session.lifecycle?.session.completedAt ??
     session.lifecycle?.session.lastTransitionAt ??
     session.lastActivityAt;
-  const runtimeLabel = session.lifecycle?.runtime.label ?? "Unavailable";
+  const runtimeLabel = session.lifecycle?.runtime.label ?? t("session.unavailable");
   const prLabel = pr
     ? pr.state === "merged"
-      ? "Merged"
+      ? t("session.merged")
       : pr.state === "closed"
-        ? "Closed"
+        ? t("session.closed")
         : pr.mergeability.mergeable
-          ? "Open, merge-ready"
-          : "Open"
-    : "No PR";
+          ? t("session.openMergeReady")
+          : t("session.open")
+    : t("session.noPrShort");
 
   return (
-    <section className="session-ended-summary" aria-label="Session ended summary">
+    <section className="session-ended-summary" aria-label={t("session.terminalEndedSummary")}>
       <div className="session-ended-summary__panel">
-        <div className="session-ended-summary__eyebrow">Terminal ended</div>
+        <div className="session-ended-summary__eyebrow">{t("session.terminalEnded")}</div>
         <div className="session-ended-summary__header">
           <div className="session-ended-summary__icon" aria-hidden="true">
             <svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
@@ -76,32 +84,32 @@ export function SessionEndedSummary({
           <div className="session-ended-summary__title-group">
             <h2 className="session-ended-summary__title">{headline}</h2>
             <p className="session-ended-summary__subtitle">
-              {reason}. The live terminal is gone, but the session context is still available.
+              {t("session.terminalEndedContext", { reason })}
             </p>
           </div>
         </div>
 
         <div className="session-ended-summary__body">
           <div className="session-ended-summary__section">
-            <div className="session-ended-summary__label">What happened</div>
+            <div className="session-ended-summary__label">{t("session.whatHappened")}</div>
             <p className="session-ended-summary__copy">{summary}</p>
           </div>
 
-          <div className="session-ended-summary__facts" aria-label="Session facts">
+          <div className="session-ended-summary__facts" aria-label={t("session.sessionFacts")}>
             <div className="session-ended-summary__fact">
-              <span>Session</span>
+              <span>{t("session.sessionFact")}</span>
               <strong>{session.id}</strong>
             </div>
             <div className="session-ended-summary__fact">
-              <span>Ended</span>
-              <strong>{formatEndedTime(endedAt)}</strong>
+              <span>{t("session.ended")}</span>
+              <strong>{formatEndedTime(endedAt, t)}</strong>
             </div>
             <div className="session-ended-summary__fact">
-              <span>Runtime</span>
+              <span>{t("session.runtime")}</span>
               <strong>{runtimeLabel}</strong>
             </div>
             <div className="session-ended-summary__fact">
-              <span>PR</span>
+              <span>{t("session.pr")}</span>
               <strong>{prLabel}</strong>
             </div>
           </div>
@@ -114,17 +122,17 @@ export function SessionEndedSummary({
                 rel="noopener noreferrer"
                 className="session-ended-summary__primary"
               >
-                Open PR #{pr.number}
+                {t("session.openPr", { number: pr.number })}
               </a>
             ) : null}
             <a href={dashboardHref} className="session-ended-summary__secondary">
-              Back to dashboard
+              {t("common.backToDashboard")}
             </a>
           </div>
 
           {session.lifecycle?.evidence ? (
             <div className="session-ended-summary__evidence">
-              <span>Evidence</span>
+              <span>{t("session.evidence")}</span>
               <code>{session.lifecycle.evidence}</code>
             </div>
           ) : null}

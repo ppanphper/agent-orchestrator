@@ -10,24 +10,66 @@ import {
   type DashboardSession,
 } from "@/lib/types";
 import { getSessionTitle } from "@/lib/format";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { projectSessionPath } from "@/lib/routes";
 
-function getRelativeTime(dateStr: string): string {
+function getRelativeTime(
+  dateStr: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diffMs = now - then;
   const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 60) return t("session.secondsAgo", { count: diffSec });
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return t("session.minutesAgo", { count: diffMin });
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return t("session.hoursAgo", { count: diffHr });
   const diffDay = Math.floor(diffHr / 24);
-  return `${diffDay}d ago`;
+  return t("session.daysAgo", { count: diffDay });
 }
 
 function formatTagLabel(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function translateTagLabel(
+  value: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  switch (value) {
+    case "merge":
+      return t("projects.metrics.merge");
+    case "respond":
+      return t("projects.metrics.respond");
+    case "review":
+      return t("projects.metrics.review");
+    case "pending":
+      return t("projects.metrics.pending");
+    case "working":
+    case "active":
+      return t("session.active");
+    case "ready":
+      return t("session.ready");
+    case "idle":
+      return t("session.idle");
+    case "waiting_input":
+      return t("session.waitingInput");
+    case "blocked":
+      return t("session.blocked");
+    case "exited":
+      return t("session.exited");
+    case "done":
+      return t("done.done");
+    case "merged":
+      return t("done.merged");
+    case "terminated":
+    case "killed":
+      return t("done.terminated");
+    default:
+      return formatTagLabel(value);
+  }
 }
 
 function isTag(
@@ -58,6 +100,7 @@ export function BottomSheet({
   onMerge,
   isMergeReady = false,
 }: BottomSheetProps) {
+  const { t } = useI18n();
   const touchStartYRef = useRef<number | null>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -134,9 +177,11 @@ export function BottomSheet({
   const showLivePrData = Boolean(pr && !isPRRateLimited(pr) && !isPRUnenriched(pr));
   const showTerminalStatePills = attention === "done" || isDashboardSessionTerminal(session);
   const tags = [
-    { label: formatTagLabel(attention), tone: "accent" as const },
-    { label: formatTagLabel(session.status), tone: "neutral" as const },
-    session.activity ? { label: formatTagLabel(session.activity), tone: "neutral" as const } : null,
+    { label: translateTagLabel(attention, t), tone: "accent" as const },
+    { label: translateTagLabel(session.status, t), tone: "neutral" as const },
+    session.activity
+      ? { label: translateTagLabel(session.activity, t), tone: "neutral" as const }
+      : null,
     session.branch ? { label: session.branch, tone: "mono" as const } : null,
     session.pr ? { label: `PR #${session.pr.number}`, tone: "neutral" as const } : null,
     session.issueLabel ? { label: session.issueLabel, tone: "neutral" as const } : null,
@@ -164,9 +209,9 @@ export function BottomSheet({
           <>
             <div className="bottom-sheet__header">
               <h2 id="bottom-sheet-title" className="bottom-sheet__title">
-                Terminate session?
+                {t("session.terminateQuestion")}
               </h2>
-              <p className="bottom-sheet__subtitle">This action cannot be undone.</p>
+              <p className="bottom-sheet__subtitle">{t("session.terminateWarning")}</p>
             </div>
 
             <div className="bottom-sheet__session-info">
@@ -192,14 +237,15 @@ export function BottomSheet({
                 <div className="bottom-sheet__preview-header">
                   <span className="bottom-sheet__preview-id">{session.id}</span>
                   <span className="bottom-sheet__preview-time">
-                    {getRelativeTime(session.lastActivityAt)}
+                    {getRelativeTime(session.lastActivityAt, t)}
                   </span>
                 </div>
                 <h2 id="bottom-sheet-title" className="bottom-sheet__title">
                   {title}
                 </h2>
                 <p className="bottom-sheet__subtitle">
-                  {formatTagLabel(attention)} · started {getRelativeTime(session.createdAt)}
+                  {translateTagLabel(attention, t)} · {t("session.started")}{" "}
+                  {getRelativeTime(session.createdAt, t)}
                 </p>
 
                 <div className="bottom-sheet__preview-meta">
@@ -219,37 +265,37 @@ export function BottomSheet({
                   <div className="bottom-sheet__preview-pills">
                     <span className="bottom-sheet__tag bottom-sheet__tag--neutral">
                       {pr.ciStatus === "passing"
-                        ? "CI passing"
+                        ? t("session.ciPassing")
                         : pr.ciStatus === "failing"
-                          ? "CI failed"
-                          : "CI pending"}
+                          ? t("session.ciFailed")
+                          : t("session.ciPending")}
                     </span>
                     <span className="bottom-sheet__tag bottom-sheet__tag--accent">
                       {pr.reviewDecision === "approved"
-                        ? "approved"
+                        ? t("session.approved")
                         : pr.reviewDecision === "changes_requested"
-                          ? "changes requested"
-                          : "needs review"}
+                          ? t("session.changesRequested")
+                          : t("session.needsReview")}
                     </span>
                     {showTerminalStatePills ? (
                       <span className="bottom-sheet__tag bottom-sheet__tag--accent">
-                        {formatTagLabel(session.status)}
+                        {translateTagLabel(session.status, t)}
                       </span>
                     ) : null}
                     {showTerminalStatePills && session.activity ? (
                       <span className="bottom-sheet__tag bottom-sheet__tag--neutral">
-                        {formatTagLabel(session.activity)}
+                        {translateTagLabel(session.activity, t)}
                       </span>
                     ) : null}
                   </div>
                 ) : (
                   <div className="bottom-sheet__preview-pills">
                     <span className="bottom-sheet__tag bottom-sheet__tag--accent">
-                      {formatTagLabel(session.status)}
+                      {translateTagLabel(session.status, t)}
                     </span>
                     {session.activity ? (
                       <span className="bottom-sheet__tag bottom-sheet__tag--neutral">
-                        {formatTagLabel(session.activity)}
+                        {translateTagLabel(session.activity, t)}
                       </span>
                     ) : null}
                   </div>
@@ -268,14 +314,14 @@ export function BottomSheet({
                 className="bottom-sheet__btn bottom-sheet__btn--cancel"
                 onClick={onCancel}
               >
-                Cancel
+                {t("session.cancel")}
               </button>
               <button
                 type="button"
                 className="bottom-sheet__btn bottom-sheet__btn--danger"
                 onClick={onConfirm}
               >
-                Terminate
+                {t("session.terminateShort")}
               </button>
             </>
           ) : (
@@ -284,7 +330,7 @@ export function BottomSheet({
                 href={projectSessionPath(session.projectId, session.id)}
                 className="bottom-sheet__btn bottom-sheet__btn--primary"
               >
-                Open session
+                {t("session.openSession")}
               </a>
               {isMergeReady && session.pr && onMerge ? (
                 <button
@@ -296,7 +342,7 @@ export function BottomSheet({
                     }
                   }}
                 >
-                  Merge
+                  {t("session.merge")}
                 </button>
               ) : hasLiveTerminateAction && onRequestKill ? (
                 <button
@@ -317,7 +363,7 @@ export function BottomSheet({
                     <path d="M19 6l-1 14H6L5 6" />
                     <path d="M10 11v6M14 11v6" />
                   </svg>
-                  Terminate
+                  {t("session.terminateShort")}
                 </button>
               ) : null}
             </>

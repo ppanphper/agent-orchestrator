@@ -20,6 +20,7 @@ import { MobileBottomNav } from "./MobileBottomNav";
 import type { ProjectInfo } from "@/lib/project-name";
 import { getProjectScopedHref } from "@/lib/project-utils";
 import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
+import { useI18n } from "@/lib/i18n";
 
 interface PullRequestsPageProps {
   initialSessions: DashboardSession[];
@@ -35,13 +36,6 @@ const EMPTY_ORCHESTRATORS: DashboardOrchestratorLink[] = [];
 
 type PRFilterValue = "all" | "open" | "merged" | "closed";
 
-function getSectionLabel(filter: PRFilterValue): string {
-  if (filter === "open") return "Open PRs";
-  if (filter === "merged") return "Merged PRs";
-  if (filter === "closed") return "Closed PRs";
-  return "All PRs";
-}
-
 export function PullRequestsPage({
   initialSessions,
   projectId,
@@ -50,6 +44,7 @@ export function PullRequestsPage({
   orchestrators,
   attentionZones = "simple",
 }: PullRequestsPageProps) {
+  const { t } = useI18n();
   const orchestratorLinks = orchestrators ?? EMPTY_ORCHESTRATORS;
   const mux = useMuxOptional();
   // Seed initial attention levels using the same mode used during refresh
@@ -79,7 +74,7 @@ export function PullRequestsPage({
   const currentProjectOrchestrator = useMemo(
     () =>
       projectId
-        ? orchestratorLinks.find((orchestrator) => orchestrator.projectId === projectId) ?? null
+        ? (orchestratorLinks.find((orchestrator) => orchestrator.projectId === projectId) ?? null)
         : null,
     [orchestratorLinks, projectId],
   );
@@ -95,21 +90,39 @@ export function PullRequestsPage({
   const openPRs = useMemo(() => allPRs.filter((pr) => pr.state === "open"), [allPRs]);
   const mergedPRs = useMemo(() => allPRs.filter((pr) => pr.state === "merged"), [allPRs]);
   const closedPRs = useMemo(() => allPRs.filter((pr) => pr.state === "closed"), [allPRs]);
-  const dashboardHref = projectId ? projectDashboardPath(projectId) : getProjectScopedHref("/", projectId);
+  const dashboardHref = projectId
+    ? projectDashboardPath(projectId)
+    : getProjectScopedHref("/", projectId);
   const prsHref = getProjectScopedHref("/prs", projectId);
   const orchestratorHref = currentProjectOrchestrator
     ? projectSessionPath(currentProjectOrchestrator.projectId, currentProjectOrchestrator.id)
     : null;
-  const activeMobilePRs = prFilter === "open" ? openPRs : prFilter === "merged" ? mergedPRs : prFilter === "closed" ? closedPRs : allPRs;
+  const activeMobilePRs =
+    prFilter === "open"
+      ? openPRs
+      : prFilter === "merged"
+        ? mergedPRs
+        : prFilter === "closed"
+          ? closedPRs
+          : allPRs;
+  const prPageTitle = projectName
+    ? t("prs.titleForProject", { project: projectName })
+    : t("prs.title");
+  const getSectionLabel = (filter: PRFilterValue): string => {
+    if (filter === "open") return t("prs.openPRs");
+    if (filter === "merged") return t("prs.mergedPRs");
+    if (filter === "closed") return t("prs.closedPRs");
+    return t("prs.allPRs");
+  };
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [searchParams]);
 
   return (
-      <div
-        className={`dashboard-shell flex h-screen${!isMobile && sidebarCollapsed ? " dashboard-shell--sidebar-collapsed" : ""}`}
-      >
+    <div
+      className={`dashboard-shell flex h-screen${!isMobile && sidebarCollapsed ? " dashboard-shell--sidebar-collapsed" : ""}`}
+    >
       {showSidebar ? (
         <div className={`sidebar-wrapper${mobileMenuOpen ? " sidebar-wrapper--mobile-open" : ""}`}>
           <ProjectSidebar
@@ -128,7 +141,7 @@ export function PullRequestsPage({
         <div className="sidebar-mobile-backdrop" onClick={() => setMobileMenuOpen(false)} />
       )}
       <div className="dashboard-main flex-1 overflow-y-auto px-4 py-4 md:px-7 md:py-6">
-        <DynamicFavicon attentionLevels={attentionLevels} projectName={projectName ? `${projectName} PRs` : "Pull Requests"} />
+        <DynamicFavicon attentionLevels={attentionLevels} projectName={prPageTitle} />
         {isMobile ? (
           <section className="mobile-pr-page-header">
             <div className="mobile-pr-page-header__top">
@@ -138,7 +151,7 @@ export function PullRequestsPage({
                     type="button"
                     className="mobile-menu-toggle"
                     onClick={() => setMobileMenuOpen(true)}
-                    aria-label="Open menu"
+                    aria-label={t("nav.openMenu")}
                   >
                     <svg
                       fill="none"
@@ -151,9 +164,7 @@ export function PullRequestsPage({
                     </svg>
                   </button>
                 ) : null}
-                <h1 className="mobile-pr-page-header__title">
-                  {projectName ? `${projectName} PRs` : "Pull Requests"}
-                </h1>
+                <h1 className="mobile-pr-page-header__title">{prPageTitle}</h1>
               </div>
               <div className="mobile-pr-page-header__meta">
                 <span className="mobile-pr-page-header__count">{allPRs.length}</span>
@@ -161,7 +172,7 @@ export function PullRequestsPage({
               </div>
             </div>
             <p className="mobile-pr-page-header__subtitle">
-              Open pull requests created by agents{allProjectsView ? " across projects" : " in this project"}.
+              {allProjectsView ? t("prs.subtitleAcrossProjects") : t("prs.subtitleProject")}
             </p>
           </section>
         ) : (
@@ -173,7 +184,7 @@ export function PullRequestsPage({
                   type="button"
                   className="mobile-menu-toggle"
                   onClick={() => setMobileMenuOpen(true)}
-                  aria-label="Open menu"
+                  aria-label={t("nav.openMenu")}
                 >
                   <svg
                     fill="none"
@@ -189,18 +200,18 @@ export function PullRequestsPage({
               <div className="dashboard-hero__primary">
                 <div className="dashboard-hero__heading">
                   <div>
-                    <h1 className="dashboard-title">{projectName ? `${projectName} PRs` : "Pull Requests"}</h1>
+                    <h1 className="dashboard-title">{prPageTitle}</h1>
                     <p className="dashboard-subtitle">
-                      Open pull requests created by agents{allProjectsView ? " across all projects" : " in this project"}.
+                      {allProjectsView ? t("prs.subtitleAll") : t("prs.subtitleProject")}
                     </p>
                   </div>
                 </div>
                 <div className="dashboard-stat-cards dashboard-stat-cards--persist-mobile">
                   <div className="dashboard-stat-card">
                     <span className="dashboard-stat-card__value">{openPRs.length}</span>
-                    <span className="dashboard-stat-card__label">Open PRs</span>
+                    <span className="dashboard-stat-card__label">{t("prs.openPRs")}</span>
                     <span className="dashboard-stat-card__meta">
-                      {allProjectsView ? "Across all projects" : "In this project"}
+                      {allProjectsView ? t("prs.acrossAllProjects") : t("prs.inThisProject")}
                     </span>
                   </div>
                 </div>
@@ -214,10 +225,10 @@ export function PullRequestsPage({
           <div className={isMobile ? "mobile-pr-filter-tabs" : "mb-4 flex items-center gap-1.5"}>
             {(
               [
-                { value: "all", label: "All", count: allPRs.length },
-                { value: "open", label: "Open", count: openPRs.length },
-                { value: "merged", label: "Merged", count: mergedPRs.length },
-                { value: "closed", label: "Closed", count: closedPRs.length },
+                { value: "all", label: t("prs.all"), count: allPRs.length },
+                { value: "open", label: t("prs.open"), count: openPRs.length },
+                { value: "merged", label: t("prs.merged"), count: mergedPRs.length },
+                { value: "closed", label: t("prs.closed"), count: closedPRs.length },
               ] as const
             ).map(({ value, label, count }) => (
               <button
@@ -237,7 +248,13 @@ export function PullRequestsPage({
                 data-active={isMobile ? String(prFilter === value) : undefined}
               >
                 {label}
-                <span className={isMobile ? "mobile-pr-filter-tab__count" : "rounded-full bg-[var(--color-chip-bg)] px-1.5 py-px text-[9.5px] font-mono text-[var(--color-text-muted)]"}>
+                <span
+                  className={
+                    isMobile
+                      ? "mobile-pr-filter-tab__count"
+                      : "rounded-full bg-[var(--color-chip-bg)] px-1.5 py-px text-[9.5px] font-mono text-[var(--color-text-muted)]"
+                  }
+                >
                   {count}
                 </span>
               </button>
@@ -249,9 +266,9 @@ export function PullRequestsPage({
               {prFilter === "all" ? (
                 <>
                   {openPRs.length > 0 && (
-                    <section className="mobile-pr-group" aria-label="Open pull requests">
+                    <section className="mobile-pr-group" aria-label={t("prs.openPRs")}>
                       <div className="mobile-pr-section-header">
-                        <span>Open</span>
+                        <span>{t("prs.open")}</span>
                         <span>{openPRs.length}</span>
                       </div>
                       <div className="mobile-pr-list">
@@ -262,9 +279,9 @@ export function PullRequestsPage({
                     </section>
                   )}
                   {mergedPRs.length > 0 && (
-                    <section className="mobile-pr-group" aria-label="Merged pull requests">
+                    <section className="mobile-pr-group" aria-label={t("prs.mergedPRs")}>
                       <div className="mobile-pr-section-header">
-                        <span>Merged</span>
+                        <span>{t("prs.merged")}</span>
                         <span>{mergedPRs.length}</span>
                       </div>
                       <div className="mobile-pr-list">
@@ -275,9 +292,9 @@ export function PullRequestsPage({
                     </section>
                   )}
                   {closedPRs.length > 0 && (
-                    <section className="mobile-pr-group" aria-label="Closed pull requests">
+                    <section className="mobile-pr-group" aria-label={t("prs.closedPRs")}>
                       <div className="mobile-pr-section-header">
-                        <span>Closed</span>
+                        <span>{t("prs.closed")}</span>
                         <span>{closedPRs.length}</span>
                       </div>
                       <div className="mobile-pr-list">
@@ -288,24 +305,26 @@ export function PullRequestsPage({
                     </section>
                   )}
                   {allPRs.length === 0 && (
-                    <div className="mobile-pr-empty">
-                      No pull requests yet.
-                    </div>
+                    <div className="mobile-pr-empty">{t("prs.noPRsYet")}</div>
                   )}
                 </>
               ) : (
                 <section className="mobile-pr-group" aria-label={getSectionLabel(prFilter)}>
                   <div className="mobile-pr-section-header">
-                    <span>{getSectionLabel(prFilter).replace(" PRs", "")}</span>
+                    <span>{getSectionLabel(prFilter).replace(" PRs", "").replace(" PR", "")}</span>
                     <span>{activeMobilePRs.length}</span>
                   </div>
                   <div className="mobile-pr-list">
                     {activeMobilePRs.length > 0 ? (
                       activeMobilePRs.map((pr) => (
-                        <PRCard key={`${pr.owner}/${pr.repo}-${pr.number}`} pr={pr} muted={prFilter !== "open"} />
+                        <PRCard
+                          key={`${pr.owner}/${pr.repo}-${pr.number}`}
+                          pr={pr}
+                          muted={prFilter !== "open"}
+                        />
                       ))
                     ) : (
-                      <div className="mobile-pr-empty">No pull requests in this view.</div>
+                      <div className="mobile-pr-empty">{t("prs.noPRsInView")}</div>
                     )}
                   </div>
                 </section>
@@ -320,19 +339,19 @@ export function PullRequestsPage({
                       PR
                     </th>
                     <th className="px-3 py-2 text-left text-[10.5px] font-mono font-500 uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
-                      Title
+                      {t("prs.titleColumn")}
                     </th>
                     <th className="px-3 py-2 text-left text-[10.5px] font-mono font-500 uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
-                      Size
+                      {t("prs.size")}
                     </th>
                     <th className="px-3 py-2 text-left text-[10.5px] font-mono font-500 uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
-                      CI
+                      {t("prs.ci")}
                     </th>
                     <th className="px-3 py-2 text-left text-[10.5px] font-mono font-500 uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
-                      Review
+                      {t("prs.review")}
                     </th>
                     <th className="px-3 py-2 text-left text-[10.5px] font-mono font-500 uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
-                      Threads
+                      {t("prs.threads")}
                     </th>
                   </tr>
                 </thead>
@@ -341,8 +360,11 @@ export function PullRequestsPage({
                     <>
                       {prFilter === "all" && (
                         <tr>
-                          <td colSpan={6} className="border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]">
-                            Open
+                          <td
+                            colSpan={6}
+                            className="border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]"
+                          >
+                            {t("prs.open")}
                           </td>
                         </tr>
                       )}
@@ -355,8 +377,11 @@ export function PullRequestsPage({
                     <>
                       {prFilter === "all" && (
                         <tr>
-                          <td colSpan={6} className="border-b border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]">
-                            Merged
+                          <td
+                            colSpan={6}
+                            className="border-b border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]"
+                          >
+                            {t("prs.merged")}
                           </td>
                         </tr>
                       )}
@@ -369,8 +394,11 @@ export function PullRequestsPage({
                     <>
                       {prFilter === "all" && (
                         <tr>
-                          <td colSpan={6} className="border-b border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]">
-                            Closed
+                          <td
+                            colSpan={6}
+                            className="border-b border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-3 py-1.5 text-[9.5px] font-mono font-semibold uppercase tracking-[0.06em] text-[var(--color-text-muted)]"
+                          >
+                            {t("prs.closed")}
                           </td>
                         </tr>
                       )}
@@ -381,8 +409,11 @@ export function PullRequestsPage({
                   )}
                   {allPRs.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-6 text-[12px] text-[var(--color-text-secondary)]">
-                        No pull requests yet.
+                      <td
+                        colSpan={6}
+                        className="px-4 py-6 text-[12px] text-[var(--color-text-secondary)]"
+                      >
+                        {t("prs.noPRsYet")}
                       </td>
                     </tr>
                   )}
@@ -394,7 +425,7 @@ export function PullRequestsPage({
       </div>
       {isMobile ? (
         <MobileBottomNav
-          ariaLabel="PR navigation"
+          ariaLabel={t("prs.navigation")}
           activeTab="prs"
           dashboardHref={dashboardHref}
           prsHref={prsHref}

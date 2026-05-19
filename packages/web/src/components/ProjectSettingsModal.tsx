@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ProjectSettingsForm } from "@/components/ProjectSettingsForm";
+import { useI18n } from "@/lib/i18n";
 
 interface ProjectSettingsModalProps {
   open: boolean;
@@ -27,6 +28,7 @@ interface ProjectSettingsResponse {
 }
 
 export function ProjectSettingsModal({ open, projectId, onClose }: ProjectSettingsModalProps) {
+  const { t } = useI18n();
   const modalRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export function ProjectSettingsModal({ open, projectId, onClose }: ProjectSettin
       .then(async (response) => {
         const body = (await response.json().catch(() => null)) as ProjectSettingsResponse | null;
         if (!response.ok || !body?.project || body.degraded) {
-          throw new Error(body?.error ?? "Failed to load project settings.");
+          throw new Error(body?.error ?? t("projectSettings.loadFailed"));
         }
         if (!cancelled) {
           setProject(body.project);
@@ -74,7 +76,9 @@ export function ProjectSettingsModal({ open, projectId, onClose }: ProjectSettin
       })
       .catch((fetchError) => {
         if (!cancelled) {
-          setError(fetchError instanceof Error ? fetchError.message : "Failed to load project settings.");
+          setError(
+            fetchError instanceof Error ? fetchError.message : t("projectSettings.loadFailed"),
+          );
         }
       })
       .finally(() => {
@@ -113,19 +117,19 @@ export function ProjectSettingsModal({ open, projectId, onClose }: ProjectSettin
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Project settings"
+        aria-label={t("projectSettings.title")}
         className="project-settings-modal"
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="project-settings-modal__header">
           <div>
-            <p className="project-settings-modal__eyebrow">Project settings</p>
+            <p className="project-settings-modal__eyebrow">{t("projectSettings.title")}</p>
             <h2 className="project-settings-modal__title">{project?.name ?? projectId}</h2>
           </div>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("projectSettings.close")}
             onClick={onClose}
             className="project-settings-modal__close"
           >
@@ -134,9 +138,14 @@ export function ProjectSettingsModal({ open, projectId, onClose }: ProjectSettin
         </div>
 
         <div className="project-settings-modal__body">
-          {loading ? <div className="project-settings-modal__state">Loading project settings…</div> : null}
+          {loading ? (
+            <div className="project-settings-modal__state">{t("projectSettings.loading")}</div>
+          ) : null}
           {!loading && error ? (
-            <div role="alert" className="project-settings-modal__state project-settings-modal__state--error">
+            <div
+              role="alert"
+              className="project-settings-modal__state project-settings-modal__state--error"
+            >
               {error}
             </div>
           ) : null}

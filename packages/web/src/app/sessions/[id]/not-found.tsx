@@ -1,12 +1,16 @@
+"use client";
+
 import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { useI18n } from "@/lib/i18n";
 
 export default function SessionNotFound() {
+  const { t } = useI18n();
   return (
     <ErrorDisplay
-      title="Session not found"
-      message="The session you’re looking for does not exist anymore, or the link is stale."
+      title={t("session.notFoundTitle")}
+      message={t("session.notFoundStale")}
       tone="not-found"
-      primaryAction={{ label: "Back to dashboard", href: "/" }}
+      primaryAction={{ label: t("common.backToDashboard"), href: "/" }}
       compact
       chrome="card"
     />

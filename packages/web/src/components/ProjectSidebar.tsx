@@ -523,7 +523,7 @@ function ProjectSidebarInner({
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? "Failed to rename session");
+        throw new Error(body?.error ?? t("projects.renameSession"));
       }
     } catch {
       // Roll back the optimistic update so the row reverts to the prop value.
@@ -578,7 +578,7 @@ function ProjectSidebarInner({
         throw new Error(
           (body && typeof body === "object" && "error" in body && typeof body.error === "string"
             ? body.error
-            : null) ?? "Failed to remove project.",
+            : null) ?? t("projects.removeFailed"),
         );
       }
 
@@ -596,7 +596,7 @@ function ProjectSidebarInner({
       }
       onMobileClose?.();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Failed to remove project.");
+      window.alert(error instanceof Error ? error.message : t("projects.removeFailed"));
     } finally {
       setDeletingProjectId(null);
     }
@@ -674,11 +674,11 @@ function ProjectSidebarInner({
   return (
     <aside className="project-sidebar flex h-full flex-col">
       <div className="project-sidebar__compact-hdr">
-        <span className="project-sidebar__sect-label">Projects</span>
+        <span className="project-sidebar__sect-label">{t("projects.heading")}</span>
         <button
           type="button"
           className="project-sidebar__add-btn"
-          aria-label="New project"
+          aria-label={t("projects.newProject")}
           onClick={() => setAddProjectOpen(true)}
         >
           <svg
@@ -700,14 +700,14 @@ function ProjectSidebarInner({
           role="status"
           className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-[11px] text-[var(--color-text-tertiary)]"
         >
-          <span>Failed to refresh · showing cached sessions</span>
+          <span>{t("projects.failedRefreshCached")}</span>
           {onRetry ? (
             <button
               type="button"
               onClick={onRetry}
               className="font-medium text-[var(--color-link)] hover:underline"
             >
-              Retry
+              {t("projectSettings.retry")}
             </button>
           ) : null}
         </div>
@@ -716,7 +716,7 @@ function ProjectSidebarInner({
       {/* Project tree */}
       <div className="project-sidebar__tree flex-1 overflow-y-auto overflow-x-hidden">
         {sessions === null ? (
-          <div className="space-y-1 px-3 py-3" aria-label="Loading projects">
+          <div className="space-y-1 px-3 py-3" aria-label={t("projects.loadingProjects")}>
             {Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="flex items-center gap-2 py-1">
                 <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[var(--color-border-strong)]" />
@@ -777,7 +777,7 @@ function ProjectSidebarInner({
                     </svg>
                     <span className="project-sidebar__proj-name">{project.name}</span>
                     <span className="project-sidebar__proj-badge project-sidebar__proj-badge--degraded">
-                      degraded
+                      {t("projects.degraded")}
                     </span>
                   </a>
                 ) : (
@@ -827,8 +827,8 @@ function ProjectSidebarInner({
                       onMobileClose?.();
                     }}
                     className="project-sidebar__proj-action"
-                    aria-label={`Open ${project.name} dashboard`}
-                    title="Dashboard"
+                    aria-label={t("projects.openDashboard", { project: project.name })}
+                    title={t("projects.dashboardTitle")}
                   >
                     <svg
                       width="12"
@@ -856,8 +856,8 @@ function ProjectSidebarInner({
                       );
                     }}
                     className="project-sidebar__proj-action"
-                    aria-label={`Open ${project.name} orchestrator`}
-                    title="Orchestrator"
+                    aria-label={t("projects.openOrchestrator", { project: project.name })}
+                    title={t("dashboard.orchestrator")}
                   >
                     <svg
                       width="12"
@@ -889,10 +889,10 @@ function ProjectSidebarInner({
                       );
                     }}
                     className="project-sidebar__proj-action project-sidebar__proj-action--menu"
-                    aria-label={`Project actions for ${project.name}`}
+                    aria-label={t("projects.projectActionsFor", { project: project.name })}
                     aria-expanded={projectMenuOpenId === project.id}
                     aria-haspopup="menu"
-                    title="Project actions"
+                    title={t("projects.projectActions")}
                   >
                     <svg
                       width="12"
@@ -911,7 +911,7 @@ function ProjectSidebarInner({
                       ref={projectMenuPopoverRef}
                       className="project-sidebar__proj-menu-popover"
                       role="menu"
-                      aria-label={`${project.name} actions`}
+                      aria-label={t("projects.actionsFor", { project: project.name })}
                     >
                       {orchestratorLink ? (
                         <button
@@ -926,7 +926,7 @@ function ProjectSidebarInner({
                             );
                           }}
                         >
-                          Open orchestrator
+                          {t("projects.openOrchestratorAction")}
                         </button>
                       ) : null}
                       <button
@@ -938,7 +938,7 @@ function ProjectSidebarInner({
                           setProjectSettingsProjectId(project.id);
                         }}
                       >
-                        Project settings
+                        {t("projects.projectSettings")}
                       </button>
                       <button
                         type="button"
@@ -957,14 +957,16 @@ function ProjectSidebarInner({
               </div>
 
               {isDegraded ? (
-                <div className="project-sidebar__degraded-note">Config needs repair</div>
+                <div className="project-sidebar__degraded-note">
+                  {t("projects.configNeedsRepair")}
+                </div>
               ) : null}
 
               {/* Sessions */}
               {!isDegraded && isExpanded && (
                 <div className="project-sidebar__sessions">
                   {sessions === null ? (
-                    <div className="space-y-2 px-3 py-2" aria-label="Loading sessions">
+                    <div className="space-y-2 px-3 py-2" aria-label={t("projects.loadingSessions")}>
                       {Array.from({ length: 3 }, (_, index) => (
                         <div
                           key={`${project.id}-loading-${index}`}
@@ -1009,7 +1011,7 @@ function ProjectSidebarInner({
                               onFocus={(e) => e.currentTarget.select()}
                               onBlur={() => void submitRename(session.id)}
                               maxLength={80}
-                              aria-label={`Rename ${session.id}`}
+                              aria-label={t("projects.renameId", { id: session.id })}
                               className="project-sidebar__sess-rename-input"
                             />
                           </div>
@@ -1030,17 +1032,19 @@ function ProjectSidebarInner({
                     })
                   ) : error ? (
                     <div className="px-3 py-2">
-                      <div className="project-sidebar__empty">Failed to load sessions</div>
+                      <div className="project-sidebar__empty">
+                        {t("projects.failedLoadSessions")}
+                      </div>
                       <button
                         type="button"
                         className="mt-2 text-xs font-medium text-[var(--color-link)] hover:underline"
                         onClick={onRetry}
                       >
-                        Retry
+                        {t("projectSettings.retry")}
                       </button>
                     </div>
                   ) : (
-                    <div className="project-sidebar__empty">No active sessions</div>
+                    <div className="project-sidebar__empty">{t("projects.noActiveSessions")}</div>
                   )}
                 </div>
               )}
@@ -1059,8 +1063,8 @@ function ProjectSidebarInner({
               showKilled && "project-sidebar__footer-btn--active",
             )}
             aria-pressed={showKilled}
-            title={showKilled ? "Hide killed sessions" : "Show killed sessions"}
-            aria-label={showKilled ? "Hide killed sessions" : "Show killed sessions"}
+            title={showKilled ? t("projects.hideKilled") : t("projects.showKilled")}
+            aria-label={showKilled ? t("projects.hideKilled") : t("projects.showKilled")}
           >
             {/* skull / terminated icon */}
             <svg
@@ -1086,8 +1090,8 @@ function ProjectSidebarInner({
               showDone && "project-sidebar__footer-btn--active",
             )}
             aria-pressed={showDone}
-            title={showDone ? "Hide completed sessions" : "Show completed sessions"}
-            aria-label={showDone ? "Hide completed sessions" : "Show completed sessions"}
+            title={showDone ? t("projects.hideCompleted") : t("projects.showCompleted")}
+            aria-label={showDone ? t("projects.hideCompleted") : t("projects.showCompleted")}
           >
             {/* checkmark / done icon */}
             <svg
@@ -1114,8 +1118,8 @@ function ProjectSidebarInner({
               )}
               aria-expanded={settingsOpen}
               aria-haspopup="dialog"
-              title="Sidebar settings"
-              aria-label="Sidebar settings"
+              title={t("projects.sidebarSettings")}
+              aria-label={t("projects.sidebarSettings")}
             >
               <svg
                 width="13"
@@ -1135,7 +1139,7 @@ function ProjectSidebarInner({
                 ref={settingsPopoverRef}
                 className="project-sidebar__settings-popover"
                 role="dialog"
-                aria-label="Sidebar settings"
+                aria-label={t("projects.sidebarSettings")}
               >
                 <label className="project-sidebar__settings-row">
                   <input

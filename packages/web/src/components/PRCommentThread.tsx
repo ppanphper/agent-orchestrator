@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 import type { DashboardPR } from "@/lib/types";
 import { cleanBugbotComment } from "./session-detail-utils";
 
@@ -23,6 +24,7 @@ export function PRCommentThread({
   errorUrls,
   onAskAgentToFix,
 }: PRCommentThreadProps) {
+  const { t } = useI18n();
   if (comments.length === 0) return null;
 
   return (
@@ -38,9 +40,11 @@ export function PRCommentThread({
           >
             <path d="M9 5l7 7-7 7" />
           </svg>
-          <span className="session-detail-comments-strip__label">Unresolved Comments</span>
+          <span className="session-detail-comments-strip__label">
+            {t("session.unresolvedComments")}
+          </span>
           <span className="session-detail-comments-strip__count">{unresolvedThreads}</span>
-          <span className="session-detail-comments-strip__hint">click to expand</span>
+          <span className="session-detail-comments-strip__hint">{t("session.clickToExpand")}</span>
         </div>
       </summary>
       <div className="session-detail-comments-strip__body">
@@ -71,7 +75,7 @@ export function PRCommentThread({
                     onClick={(event) => event.stopPropagation()}
                     className="session-detail-comment__view"
                   >
-                    view &rarr;
+                    {t("session.viewArrow")}
                   </a>
                 </div>
               </summary>
@@ -88,12 +92,12 @@ export function PRCommentThread({
                   )}
                 >
                   {isSending
-                    ? "Sending…"
+                    ? t("session.sending")
                     : isSent
-                      ? "Sent ✓"
+                      ? t("session.sentCheck")
                       : isError
-                        ? "Failed"
-                        : "Ask Agent to Fix"}
+                        ? t("session.failed")
+                        : t("session.askAgentToFix")}
                 </button>
               </div>
             </details>

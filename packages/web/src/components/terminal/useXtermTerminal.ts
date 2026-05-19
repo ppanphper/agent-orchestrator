@@ -12,6 +12,7 @@ import type { Terminal as TerminalType } from "@xterm/xterm";
 import type { FitAddon as FitAddonType } from "@xterm/addon-fit";
 
 import { useMux } from "@/hooks/useMux";
+import { useI18n } from "@/lib/i18n";
 import { attachTouchScroll } from "@/lib/terminal-touch-scroll";
 
 import { registerClipboardHandlers } from "./terminal-clipboard";
@@ -50,6 +51,7 @@ export function useXtermTerminal(
   options: UseXtermTerminalOptions,
 ): UseXtermTerminalResult {
   const { appearance, variant, fontSize, autoFocus, projectId, tmuxName } = options;
+  const { t } = useI18n();
   const { resolvedTheme } = useTheme();
   const terminalThemes = useMemo(() => buildTerminalThemes(variant), [variant]);
   const {
@@ -352,7 +354,7 @@ export function useXtermTerminal(
       })
       .catch((err) => {
         console.error("[DirectTerminal] Failed to load xterm.js:", err);
-        setError("Failed to load terminal");
+        setError(t("session.loadTerminalFailed"));
       });
 
     return () => {
@@ -376,6 +378,7 @@ export function useXtermTerminal(
     resizeTerminalMux,
     openTerminal,
     closeTerminal,
+    t,
   ]);
 
   // Re-send terminal dimensions on every reconnect so the server-side PTY

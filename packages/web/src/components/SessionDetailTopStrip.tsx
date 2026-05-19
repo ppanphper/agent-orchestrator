@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 import type { DashboardPR } from "@/lib/types";
 import {
   activityStateClass,
@@ -38,6 +39,7 @@ export function SessionTopStrip({
   onKill,
   onRestore,
 }: SessionTopStripProps) {
+  const { t } = useI18n();
   return (
     <div className="session-detail-top-strip">
       <div className="session-detail-crumbs">
@@ -55,7 +57,9 @@ export function SessionTopStrip({
         </a>
         <span className="session-detail-crumb-sep">/</span>
         <span className="session-detail-crumb-id">{crumbId}</span>
-        {isOrchestrator ? <span className="session-detail-mode-badge">orchestrator</span> : null}
+        {isOrchestrator ? (
+          <span className="session-detail-mode-badge">{t("session.orchestratorMode")}</span>
+        ) : null}
       </div>
 
       <div className="session-detail-identity">
@@ -64,10 +68,7 @@ export function SessionTopStrip({
           <div className="session-detail-identity__pills">
             <div className={cn("session-detail-status-pill", activityStateClass(activityLabel))}>
               <span
-                className={cn(
-                  "session-detail-status-pill__dot",
-                  activityToneClass(activityColor),
-                )}
+                className={cn("session-detail-status-pill__dot", activityToneClass(activityColor))}
               />
               <span className="session-detail-status-pill__label">{activityLabel}</span>
             </div>
@@ -124,7 +125,7 @@ export function SessionTopStrip({
                   <polyline points="1 4 1 10 7 10" />
                   <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                 </svg>
-                Restore
+                {t("session.restoreAction")}
               </button>
             ) : onKill ? (
               <button
@@ -141,7 +142,7 @@ export function SessionTopStrip({
                 >
                   <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                 </svg>
-                Kill
+                {t("session.kill")}
               </button>
             ) : null}
           </div>

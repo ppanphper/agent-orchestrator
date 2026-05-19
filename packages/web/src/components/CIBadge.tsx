@@ -1,6 +1,7 @@
 "use client";
 
 import type { CIStatus, DashboardCICheck } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 interface CIBadgeProps {
   status: CIStatus;
@@ -8,30 +9,27 @@ interface CIBadgeProps {
   compact?: boolean;
 }
 
-const statusConfig: Record<CIStatus, { label: string; className: string; icon: string }> = {
+const statusConfig: Record<CIStatus, { className: string; icon: string }> = {
   passing: {
-    label: "CI passing",
     className: "bg-[rgba(63,185,80,0.1)] text-[var(--color-accent-green)]",
     icon: "\u2713",
   },
   failing: {
-    label: "CI failing",
     className: "bg-[rgba(248,81,73,0.15)] text-[var(--color-accent-red)]",
     icon: "\u2717",
   },
   pending: {
-    label: "CI pending",
     className: "bg-[rgba(210,153,34,0.1)] text-[var(--color-accent-yellow)]",
     icon: "\u25CF",
   },
   none: {
-    label: "\u2014",
     className: "text-[var(--color-text-muted)]",
     icon: "",
   },
 };
 
 export function CIBadge({ status, checks, compact }: CIBadgeProps) {
+  const { t } = useI18n();
   const config = statusConfig[status];
   const failedCount = checks?.filter((c) => c.status === "failed").length ?? 0;
 
@@ -41,8 +39,12 @@ export function CIBadge({ status, checks, compact }: CIBadgeProps) {
 
   const label =
     status === "failing" && failedCount > 0
-      ? `${failedCount} check${failedCount > 1 ? "s" : ""} failing`
-      : config.label;
+      ? t("session.checksFailing", { count: failedCount, plural: failedCount > 1 ? "s" : "" })
+      : status === "passing"
+        ? t("session.ciPassing")
+        : status === "failing"
+          ? t("session.ciFailing")
+          : t("session.ciPending");
 
   return (
     <span
@@ -79,6 +81,7 @@ export const ciCheckSortOrder: Record<DashboardCICheck["status"], number> = {
 };
 
 export function CICheckList({ checks, layout = "vertical" }: CICheckListProps) {
+  const { t } = useI18n();
   const sorted = [...checks].sort(
     (a, b) => ciCheckSortOrder[a.status] - ciCheckSortOrder[b.status],
   );
@@ -144,7 +147,7 @@ export function CICheckList({ checks, layout = "vertical" }: CICheckListProps) {
                   rel="noopener noreferrer"
                   className="text-[11px] text-[var(--color-accent-blue)] hover:underline"
                 >
-                  view
+                  {t("session.view")}
                 </a>
               )}
             </div>
@@ -173,7 +176,7 @@ export function CICheckList({ checks, layout = "vertical" }: CICheckListProps) {
                 rel="noopener noreferrer"
                 className="shrink-0 text-[11px] text-[var(--color-accent-blue)] hover:underline"
               >
-                view
+                {t("session.view")}
               </a>
             )}
           </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 
 interface TerminalProps {
   sessionId: string;
@@ -13,6 +14,7 @@ interface TerminalProps {
  * We just request a ttyd URL from our terminal server and embed it.
  */
 export function Terminal({ sessionId }: TerminalProps) {
+  const { t } = useI18n();
   const [fullscreen, setFullscreen] = useState(false);
   const [terminalUrl, setTerminalUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +35,9 @@ export function Terminal({ sessionId }: TerminalProps) {
       })
       .catch((err) => {
         console.error("[Terminal] Failed to get terminal URL:", err);
-        setError("Failed to connect to terminal server");
+        setError(t("session.terminalConnectFailed"));
       });
-  }, [sessionId]);
+  }, [sessionId, t]);
 
   return (
     <div
@@ -64,16 +66,19 @@ export function Terminal({ sessionId }: TerminalProps) {
                 : "text-[var(--color-text-muted)]",
           )}
         >
-          {terminalUrl ? "Connected" : (error ?? "Connecting...")}
+          {terminalUrl ? t("session.connected") : (error ?? t("session.connecting"))}
         </span>
         <button
           onClick={() => setFullscreen(!fullscreen)}
           className="ml-auto rounded-[2px] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text-primary)]"
         >
-          {fullscreen ? "exit fullscreen" : "fullscreen"}
+          {fullscreen ? t("session.exitFullscreen") : t("session.fullscreen")}
         </button>
       </div>
-      <div className="w-full" style={{ height: fullscreen ? "calc(100dvh - 40px)" : "max(440px, calc(100dvh - 440px))" }}>
+      <div
+        className="w-full"
+        style={{ height: fullscreen ? "calc(100dvh - 40px)" : "max(440px, calc(100dvh - 440px))" }}
+      >
         {terminalUrl ? (
           <iframe
             src={terminalUrl}
@@ -84,7 +89,7 @@ export function Terminal({ sessionId }: TerminalProps) {
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
-            {error ?? "Connecting to terminal..."}
+            {error ?? t("session.connectingTerminal")}
           </div>
         )}
       </div>
