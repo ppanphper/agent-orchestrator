@@ -14,6 +14,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { AddProjectModal } from "./AddProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
 import { useI18n } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n";
 
 /** Minimal shape needed to render an orchestrator link in the sidebar. */
 export interface ProjectSidebarOrchestrator {
@@ -285,7 +286,7 @@ function ProjectSidebarInner({
   onToggleCollapsed: _onToggleCollapsed,
   onMobileClose,
 }: ProjectSidebarProps) {
-  const { t } = useI18n();
+  const { locale, setLocale, t } = useI18n();
   const router = useRouter();
   const _isLoading = loading || sessions === null;
 
@@ -1143,7 +1144,18 @@ function ProjectSidebarInner({
                     checked={showSessionId}
                     onChange={(e) => setShowSessionId(e.target.checked)}
                   />
-                  <span>Show session ID</span>
+                  <span>{t("projects.showSessionId")}</span>
+                </label>
+                <label className="project-sidebar__settings-row">
+                  <span>{t("language.label")}</span>
+                  <select
+                    value={locale}
+                    onChange={(event) => setLocale(event.target.value as Locale)}
+                    className="ml-auto rounded-[4px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] px-2 py-1 text-[11px] text-[var(--color-text-primary)]"
+                  >
+                    <option value="zh-CN">{t("language.chinese")}</option>
+                    <option value="en">{t("language.english")}</option>
+                  </select>
                 </label>
               </div>
             ) : null}

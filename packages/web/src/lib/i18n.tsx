@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 export type Locale = "en" | "zh-CN";
 
@@ -95,6 +95,7 @@ const en = {
     renameId: "Rename {id}",
     removeProject: "Remove project",
     removing: "Removing...",
+    showSessionId: "Show session ID",
     removeConfirm:
       "Remove project {name} from AO? This clears its AO sessions/history and removes it from the portfolio, but keeps the repository folder on disk.",
     configNeedsRepair: "Config needs repair",
@@ -159,6 +160,11 @@ const en = {
     globalMessage:
       "The dashboard could not recover from this error at the layout level. Try again first, then reload the page if it still fails.",
     reloadPage: "Reload page",
+  },
+  language: {
+    label: "Language",
+    english: "English",
+    chinese: "Chinese",
   },
 } as const;
 
@@ -258,6 +264,7 @@ const zhCN: Dictionary = {
     renameId: "重命名 {id}",
     removeProject: "移除项目",
     removing: "移除中...",
+    showSessionId: "显示会话 ID",
     removeConfirm:
       "从 AO 中移除项目 {name}？这会清除它的 AO 会话和历史记录，并从项目列表中移除，但会保留磁盘上的仓库目录。",
     configNeedsRepair: "配置需要修复",
@@ -320,6 +327,11 @@ const zhCN: Dictionary = {
     globalMessage: "控制台无法从布局层错误中恢复。请先重试；如果仍失败，再刷新页面。",
     reloadPage: "刷新页面",
   },
+  language: {
+    label: "语言",
+    english: "English",
+    chinese: "中文",
+  },
 };
 
 const dictionaries = {
@@ -351,22 +363,48 @@ function formatTemplate(template: string, vars?: Vars): string {
 
 interface I18nContextValue {
   locale: Locale;
+  setLocale: (locale: Locale) => void;
   t: (key: TranslationKey, vars?: Vars) => string;
 }
 
 const I18nContext = createContext<I18nContextValue>({
   locale: "en",
+  setLocale: () => {},
   t: (key, vars) => formatTemplate(readKey(en, key), vars),
 });
 
+const LOCALE_STORAGE_KEY = "ao:locale";
+
+function readStoredLocale(defaultLocale: Locale): Locale {
+  if (typeof window === "undefined") return defaultLocale;
+  try {
+    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    return stored === "en" || stored === "zh-CN" ? stored : defaultLocale;
+  } catch {
+    return defaultLocale;
+  }
+}
+
 export function I18nProvider({ locale, children }: { locale: Locale; children: React.ReactNode }) {
-  const dictionary = dictionaries[locale];
+  const [activeLocale, setActiveLocale] = useState<Locale>(() => readStoredLocale(locale));
+  const dictionary = dictionaries[activeLocale];
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, activeLocale);
+    } catch {
+      // localStorage unavailable - keep the in-memory locale for this session.
+    }
+    document.documentElement.lang = activeLocale;
+  }, [activeLocale]);
+
   const value = useMemo<I18nContextValue>(
     () => ({
-      locale,
+      locale: activeLocale,
+      setLocale: setActiveLocale,
       t: (key, vars) => formatTemplate(readKey(dictionary, key), vars),
     }),
-    [dictionary, locale],
+    [activeLocale, dictionary],
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
