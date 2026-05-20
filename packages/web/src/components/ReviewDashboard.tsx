@@ -9,11 +9,11 @@ import type { ProjectInfo } from "@/lib/project-name";
 import {
   getReviewBoardColumn,
   REVIEW_BOARD_COLUMNS,
-  REVIEW_COLUMN_LABELS,
   type DashboardReviewRun,
   type ReviewWorkerOption,
   type ReviewBoardColumn,
 } from "@/lib/review-types";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   projectDashboardSessionPath,
   projectDashboardPath,
@@ -49,16 +49,6 @@ interface ReviewDetailsState {
   error: string | null;
 }
 
-const COLUMN_HINTS: Record<ReviewBoardColumn, string> = {
-  queued: "Review work requested but not executing yet.",
-  reviewing: "A reviewer is reading a snapshot.",
-  triage: "Findings need a human decision.",
-  waiting: "Feedback is with the coding worker.",
-  clean: "No open AO findings remain.",
-  failed: "Reviewer runs that need retry or inspection.",
-  outdated: "Runs superseded by newer worker commits.",
-};
-
 const SUPERSEDABLE_REVIEW_STATUSES = new Set([
   "queued",
   "needs_triage",
@@ -67,20 +57,104 @@ const SUPERSEDABLE_REVIEW_STATUSES = new Set([
   "clean",
 ]);
 
-function formatRelativeTime(value: string): string {
+function reviewColumnLabelKey(column: ReviewBoardColumn): TranslationKey {
+  return `review.columns.${column}` as TranslationKey;
+}
+
+function reviewColumnHintKey(column: ReviewBoardColumn): TranslationKey {
+  return `review.columnHints.${column}` as TranslationKey;
+}
+
+function formatRelativeTime(
+  value: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
   const diffMs = Date.now() - timestamp;
   const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 1) return t("review.justNow");
+  if (diffMin < 60) return t("review.minutesAgo", { count: diffMin });
   const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
+  if (diffHours < 24) return t("review.hoursAgo", { count: diffHours });
+  return t("review.daysAgo", { count: Math.floor(diffHours / 24) });
 }
 
-function formatStatus(value: string): string {
-  return value.replaceAll("_", " ");
+function formatStatus(
+  value: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  switch (value) {
+    case "queued":
+      return t("review.statuses.queued");
+    case "preparing":
+      return t("review.statuses.preparing");
+    case "running":
+      return t("review.statuses.running");
+    case "needs_triage":
+      return t("review.statuses.needsTriage");
+    case "sent_to_agent":
+      return t("review.statuses.sentToAgent");
+    case "waiting_update":
+      return t("review.statuses.waitingUpdate");
+    case "clean":
+      return t("review.statuses.clean");
+    case "failed":
+      return t("review.statuses.failed");
+    case "cancelled":
+      return t("review.statuses.cancelled");
+    case "outdated":
+      return t("review.statuses.outdated");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function formatFindingStatus(
+  value: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  switch (value) {
+    case "open":
+      return t("review.findingStatuses.open");
+    case "dismissed":
+      return t("review.findingStatuses.dismissed");
+    case "sent_to_agent":
+      return t("review.findingStatuses.sentToAgent");
+    case "resolved":
+      return t("review.findingStatuses.resolved");
+    default:
+      return value.replaceAll("_", " ");
+  }
+}
+
+function formatSeverity(
+  value: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  switch (value) {
+    case "error":
+      return t("review.severities.error");
+    case "warning":
+      return t("review.severities.warning");
+    case "info":
+      return t("review.severities.info");
+    default:
+      return value;
+  }
+}
+
+function formatReviewSummary(
+  summary: string | undefined,
+  sessionId: string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string | undefined {
+  if (!summary) return undefined;
+  const match = summary.match(/^Review requested from (CLI|dashboard|automation) for (.+)\.$/);
+  if (!match) return summary;
+
+  const source = match[1] === "CLI" ? "CLI" : t(`review.sources.${match[1]}` as TranslationKey);
+  return t("review.defaultSummary", { source, sessionId: match[2] ?? sessionId });
 }
 
 function formatFindingLocation(finding: CodeReviewFinding): string | null {
@@ -92,8 +166,11 @@ function formatFindingLocation(finding: CodeReviewFinding): string | null {
   return `${finding.filePath}:${finding.startLine}`;
 }
 
-function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+function formatFindingCount(
+  count: number,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  return t("review.finding", { count, plural: count === 1 ? "" : "s" });
 }
 
 function canSendFeedbackToWorker(run: DashboardReviewRun): boolean {
@@ -102,12 +179,15 @@ function canSendFeedbackToWorker(run: DashboardReviewRun): boolean {
   return run.workerRuntimeState !== "missing" && run.workerRuntimeState !== "exited";
 }
 
-function getWorkerAvailabilityLabel(run: DashboardReviewRun): string {
-  if (!run.workerHasRuntime) return "no runtime";
-  if (run.workerActivity === "exited") return "exited";
-  if (run.workerRuntimeState === "missing") return "runtime missing";
-  if (run.workerRuntimeState === "exited") return "runtime exited";
-  return run.workerActivity ?? run.workerStatus ?? "worker";
+function getWorkerAvailabilityLabel(
+  run: DashboardReviewRun,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  if (!run.workerHasRuntime) return t("review.workerAvailability.noRuntime");
+  if (run.workerActivity === "exited") return t("review.workerAvailability.exited");
+  if (run.workerRuntimeState === "missing") return t("review.workerAvailability.runtimeMissing");
+  if (run.workerRuntimeState === "exited") return t("review.workerAvailability.runtimeExited");
+  return run.workerActivity ?? run.workerStatus ?? t("review.workerAvailability.worker");
 }
 
 function mergeOrchestrators(
@@ -147,6 +227,7 @@ function ReviewDashboardInner({
   dashboardLoadError,
 }: ReviewDashboardProps) {
   const { showToast } = useToast();
+  const { t } = useI18n();
   const router = useRouter();
   const menuRef = useRef<HTMLDivElement>(null);
   const [reviewRuns, setReviewRuns] = useState(runs);
@@ -235,7 +316,8 @@ function ReviewDashboardInner({
     : workerOptions;
   const codingHref = projectId ? projectDashboardPath(projectId) : "/?project=all";
   const reviewHref = projectReviewPath(projectId);
-  const headerProjectLabel = projectName ?? (allProjectsView ? "All projects" : "Reviews");
+  const localizedProjectName = allProjectsView ? t("review.allProjects") : projectName;
+  const headerProjectLabel = localizedProjectName ?? t("review.title");
 
   const handleToggleSidebar = () => {
     if (isMobile) {
@@ -259,7 +341,7 @@ function ReviewDashboardInner({
         error?: string;
       } | null;
       if (!response.ok || !data?.run) {
-        throw new Error(data?.error ?? "Failed to request review");
+        throw new Error(data?.error ?? t("review.requestFailed"));
       }
 
       const nextRun: DashboardReviewRun = {
@@ -281,10 +363,10 @@ function ReviewDashboardInner({
         ),
       ]);
       setNewReviewMenuOpen(false);
-      showToast("Review run requested", "success");
+      showToast(t("review.reviewRunRequested"), "success");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to request review";
-      showToast(`Review failed: ${message}`, "error");
+      const message = error instanceof Error ? error.message : t("review.requestFailed");
+      showToast(t("review.reviewFailed", { message }), "error");
     } finally {
       setRequestingSessionId(null);
     }
@@ -315,7 +397,7 @@ function ReviewDashboardInner({
         error?: string;
       } | null;
       if (!response.ok || !data?.run) {
-        throw new Error(data?.error ?? "Failed to execute review");
+        throw new Error(data?.error ?? t("review.executeFailed"));
       }
 
       setReviewRuns((current) =>
@@ -338,21 +420,23 @@ function ReviewDashboardInner({
       );
       if (data.run.status === "failed") {
         showToast(
-          `Review failed: ${data.run.terminationReason ?? "Reviewer execution failed"}`,
+          t("review.reviewFailed", {
+            message: data.run.terminationReason ?? t("review.reviewerExecutionFailed"),
+          }),
           "error",
         );
         return;
       }
       showToast(
-        data.run.openFindingCount > 0 ? "Review findings ready" : "Review completed clean",
+        data.run.openFindingCount > 0 ? t("review.findingsReady") : t("review.completedClean"),
         "success",
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to execute review";
+      const message = error instanceof Error ? error.message : t("review.executeFailed");
       setReviewRuns((current) =>
         current.map((entry) => (entry.id === run.id ? { ...entry, status: "failed" } : entry)),
       );
-      showToast(`Review failed: ${message}`, "error");
+      showToast(t("review.reviewFailed", { message }), "error");
     } finally {
       setExecutingRunIds((current) => {
         const next = new Set(current);
@@ -394,7 +478,7 @@ function ReviewDashboardInner({
         error?: string;
       } | null;
       if (!response.ok || !data?.run) {
-        throw new Error(data?.error ?? "Failed to send review findings");
+        throw new Error(data?.error ?? t("review.sendFailed"));
       }
 
       setReviewRuns((current) =>
@@ -416,15 +500,19 @@ function ReviewDashboardInner({
         };
       });
       showToast(
-        `Sent ${pluralize(data.sentFindingCount ?? 0, "finding")} to ${run.linkedSessionId}`,
+        t("review.sentFindingsTo", {
+          count: data.sentFindingCount ?? 0,
+          plural: (data.sentFindingCount ?? 0) === 1 ? "" : "s",
+          sessionId: run.linkedSessionId,
+        }),
         "success",
       );
       router.push(
         projectSessionHashPath(run.projectId, run.linkedSessionId, "#session-terminal-section"),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to send review findings";
-      showToast(`Feedback failed: ${message}`, "error");
+      const message = error instanceof Error ? error.message : t("review.sendFailed");
+      showToast(t("review.feedbackFailed", { message }), "error");
     } finally {
       setSendingRunIds((current) => {
         const next = new Set(current);
@@ -446,7 +534,7 @@ function ReviewDashboardInner({
         session?: DashboardSession;
       } | null;
       if (!response.ok) {
-        throw new Error(data?.error ?? "Failed to restore orchestrator");
+        throw new Error(data?.error ?? t("review.restoreFailed"));
       }
 
       setActiveOrchestrators((current) =>
@@ -464,11 +552,11 @@ function ReviewDashboardInner({
             : entry,
         ),
       );
-      showToast("Orchestrator restored", "success");
+      showToast(t("review.orchestratorRestored"), "success");
       router.push(projectSessionPath(orchestrator.projectId, orchestrator.id));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to restore orchestrator";
-      showToast(`Restore failed: ${message}`, "error");
+      const message = error instanceof Error ? error.message : t("review.restoreFailed");
+      showToast(t("review.restoreFailedToast", { message }), "error");
     } finally {
       setRestoringOrchestratorId(null);
     }
@@ -484,7 +572,7 @@ function ReviewDashboardInner({
         error?: string;
       } | null;
       if (!response.ok || !data?.findings) {
-        throw new Error(data?.error ?? "Failed to load review findings");
+        throw new Error(data?.error ?? t("review.loadFindingsFailed"));
       }
 
       setReviewDetails((current) =>
@@ -493,7 +581,7 @@ function ReviewDashboardInner({
           : current,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load review findings";
+      const message = error instanceof Error ? error.message : t("review.loadFindingsFailed");
       setReviewDetails((current) =>
         current?.run.id === run.id
           ? { ...current, findings: [], loading: false, error: message }
@@ -512,7 +600,7 @@ function ReviewDashboardInner({
             type="button"
             className="dashboard-app-sidebar-toggle"
             onClick={handleToggleSidebar}
-            aria-label="Toggle sidebar"
+            aria-label={t("review.toggleSidebar")}
           >
             {isMobile ? (
               <svg
@@ -543,20 +631,20 @@ function ReviewDashboardInner({
           </button>
           <div className="dashboard-app-header__brand">
             <span className="dashboard-app-header__brand-dot" aria-hidden="true" />
-            <span>Agent Orchestrator</span>
+            <span>{t("app.name")}</span>
           </div>
           <span className="dashboard-app-header__sep" aria-hidden="true" />
           <span className="dashboard-app-header__project">{headerProjectLabel}</span>
-          <nav className="workspace-mode-switch" aria-label="Workspace mode">
+          <nav className="workspace-mode-switch" aria-label={t("review.workspaceMode")}>
             <Link href={codingHref} className="workspace-mode-switch__item">
-              Coding
+              {t("review.coding")}
             </Link>
             <Link
               href={reviewHref}
               className="workspace-mode-switch__item workspace-mode-switch__item--active"
               aria-current="page"
             >
-              Reviews
+              {t("review.reviews")}
             </Link>
           </nav>
           <div className="dashboard-app-header__spacer" />
@@ -584,14 +672,14 @@ function ReviewDashboardInner({
                     <path d="M20 19v-4h-4" />
                   </svg>
                   {restoringOrchestratorId === currentProjectOrchestrator.id
-                    ? "Restoring"
-                    : "Restore orchestrator"}
+                    ? t("review.restoring")
+                    : t("review.restoreOrchestrator")}
                 </button>
               ) : (
                 <Link
                   href={orchestratorHref}
                   className="dashboard-app-btn dashboard-app-btn--amber"
-                  aria-label="Open project orchestrator"
+                  aria-label={t("review.openProjectOrchestrator")}
                 >
                   <svg
                     width="12"
@@ -608,7 +696,7 @@ function ReviewDashboardInner({
                     <circle cx="12" cy="17" r="2" />
                     <circle cx="18" cy="17" r="2" />
                   </svg>
-                  Orchestrator
+                  {t("dashboard.orchestrator")}
                 </Link>
               )
             ) : null}
@@ -632,7 +720,7 @@ function ReviewDashboardInner({
                 >
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                New Review
+                {t("review.newReview")}
               </button>
               {newReviewMenuOpen ? (
                 <div className="review-new-menu__popover" role="menu">
@@ -687,17 +775,30 @@ function ReviewDashboardInner({
             <div className="review-main-header">
               <div>
                 <h1 className="dashboard-main__title">
-                  {projectName ? `${projectName} Reviews` : "Reviews"}
+                  {localizedProjectName
+                    ? t("review.titleForProject", { project: localizedProjectName })
+                    : t("review.title")}
                 </h1>
                 <p className="dashboard-main__subtitle">
-                  AO-local reviewer runs, findings, and worker handoffs
-                  {allProjectsView ? " across all projects" : " for this project"}.
+                  {allProjectsView ? t("review.subtitleAll") : t("review.subtitleProject")}
                 </p>
               </div>
               <div className="dashboard-stat-cards dashboard-stat-cards--persist-mobile">
-                <ReviewMetric label="Runs" value={reviewRuns.length} meta="Total review runs" />
-                <ReviewMetric label="Active" value={activeRunCount} meta="Open review loops" />
-                <ReviewMetric label="Findings" value={openFindingCount} meta="Open AO findings" />
+                <ReviewMetric
+                  label={t("review.runs")}
+                  value={reviewRuns.length}
+                  meta={t("review.totalReviewRuns")}
+                />
+                <ReviewMetric
+                  label={t("review.active")}
+                  value={activeRunCount}
+                  meta={t("review.openReviewLoops")}
+                />
+                <ReviewMetric
+                  label={t("review.findings")}
+                  value={openFindingCount}
+                  meta={t("review.openAoFindings")}
+                />
               </div>
             </div>
 
@@ -709,16 +810,13 @@ function ReviewDashboardInner({
 
             {reviewRuns.length === 0 ? (
               <section className="review-empty-state">
-                <div className="review-empty-state__title">No review runs yet</div>
-                <p className="review-empty-state__body">
-                  Reviewer runs will appear here after a worker is ready for review or after a
-                  manual review is requested.
-                </p>
+                <div className="review-empty-state__title">{t("review.noRunsTitle")}</div>
+                <p className="review-empty-state__body">{t("review.noRunsBody")}</p>
                 <Link
                   href={projectId ? projectDashboardPath(projectId) : "/?project=all"}
                   className="review-empty-state__link"
                 >
-                  Back to coding dashboard
+                  {t("review.backToCoding")}
                 </Link>
               </section>
             ) : (
@@ -801,15 +899,17 @@ function ReviewColumn({
   onExecute: (run: DashboardReviewRun) => void;
   onSendFeedback: (run: DashboardReviewRun) => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="kanban-column review-kanban-column" data-review-column={column}>
       <div className="kanban-column__header">
         <div className="kanban-column__title-row">
           <div className="kanban-column__dot review-column-dot" data-review-column={column} />
-          <span className="kanban-column__title">{REVIEW_COLUMN_LABELS[column]}</span>
+          <span className="kanban-column__title">{t(reviewColumnLabelKey(column))}</span>
           <span className="kanban-column__count">{runs.length}</span>
         </div>
-        <p className="review-column-hint">{COLUMN_HINTS[column]}</p>
+        <p className="review-column-hint">{t(reviewColumnHintKey(column))}</p>
       </div>
 
       <div className="kanban-column-body">
@@ -851,18 +951,21 @@ function ReviewCard({
   onExecute: (run: DashboardReviewRun) => void;
   onSendFeedback: (run: DashboardReviewRun) => void;
 }) {
+  const { t } = useI18n();
   const workerHref = projectDashboardSessionPath(run.projectId, run.linkedSessionId);
   const title = run.workerTitle ?? run.linkedSessionId;
-  const status = formatStatus(run.status);
-  const totalFindingLabel = pluralize(run.findingCount, "finding");
+  const status = formatStatus(run.status, t);
+  const totalFindingLabel = formatFindingCount(run.findingCount, t);
   const secondaryText =
-    run.summary ??
+    formatReviewSummary(run.summary, run.linkedSessionId, t) ??
     (run.status === "clean"
-      ? "Reviewer completed without open AO findings."
-      : `Review requested for ${run.linkedSessionId}.`);
+      ? t("review.reviewerCompletedClean")
+      : t("review.reviewRequestedFor", { sessionId: run.linkedSessionId }));
   const truthLine = `${status} · ${totalFindingLabel}${
-    run.dismissedFindingCount > 0 ? ` · ${pluralize(run.dismissedFindingCount, "dismissed")}` : ""
-  }${run.sentFindingCount > 0 ? ` · ${pluralize(run.sentFindingCount, "sent")}` : ""} · worker ${getWorkerAvailabilityLabel(run)}`;
+    run.dismissedFindingCount > 0
+      ? ` · ${t("review.dismissed", { count: run.dismissedFindingCount })}`
+      : ""
+  }${run.sentFindingCount > 0 ? ` · ${t("review.sent", { count: run.sentFindingCount })}` : ""} · ${t("review.workerLabel")} ${getWorkerAvailabilityLabel(run, t)}`;
   const canExecute = isExecuting || run.status === "queued" || run.status === "failed";
   const feedbackAvailable = canSendFeedbackToWorker(run);
   const dotClass =
@@ -906,7 +1009,7 @@ function ReviewCard({
             <path d="M4 19.5V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-1.5Z" />
             <path d="M8 7h6M8 11h6M8 15h4" />
           </svg>
-          details
+          {t("review.details")}
         </button>
       </div>
 
@@ -950,7 +1053,7 @@ function ReviewCard({
               <span className="alert-row__text">
                 <button type="button" onClick={() => onOpenDetails(run)}>
                   <span className="font-bold">{run.openFindingCount}</span>{" "}
-                  {run.openFindingCount === 1 ? "open finding" : "open findings"}
+                  {run.openFindingCount === 1 ? t("review.openFinding") : t("review.openFindings")}
                 </button>
               </span>
               <button
@@ -958,7 +1061,7 @@ function ReviewCard({
                 className="alert-row__action"
                 onClick={() => onOpenDetails(run)}
               >
-                view
+                {t("review.view")}
               </button>
             </div>
           </div>
@@ -966,7 +1069,7 @@ function ReviewCard({
 
         <div className="session-card__footer">
           <span className="card__status min-w-0 truncate">
-            {status} · updated {formatRelativeTime(run.updatedAt)}
+            {status} · {t("review.updated")} {formatRelativeTime(run.updatedAt, t)}
           </span>
           <div className="session-card__footer-actions">
             {canExecute ? (
@@ -986,11 +1089,15 @@ function ReviewCard({
                 >
                   <path d="M5 3v18l15-9-15-9Z" />
                 </svg>
-                {isExecuting ? "Running" : run.status === "failed" ? "Retry" : "Run"}
+                {isExecuting
+                  ? t("review.running")
+                  : run.status === "failed"
+                    ? t("review.retry")
+                    : t("review.run")}
               </button>
             ) : null}
             <Link href={workerHref} className="session-card__control session-card__review-control">
-              Worker
+              {t("review.worker")}
             </Link>
             {feedbackAvailable ? (
               <button
@@ -999,19 +1106,19 @@ function ReviewCard({
                 disabled={isSending || run.openFindingCount === 0}
                 title={
                   run.openFindingCount === 0
-                    ? "No open review findings to send."
-                    : "Send review findings to the worker."
+                    ? t("review.noOpenFindingsToSend")
+                    : t("review.sendFindingsToWorker")
                 }
                 onClick={() => onSendFeedback(run)}
               >
-                {isSending ? "Sending" : "Feedback"}
+                {isSending ? t("review.sending") : t("review.feedback")}
               </button>
             ) : (
               <span
                 className="session-card__control session-card__terminal-link review-card__disabled-control"
-                title="This worker has no live runtime to receive terminal feedback."
+                title={t("review.workerFeedbackUnavailableTitle")}
               >
-                {getWorkerAvailabilityLabel(run)}
+                {getWorkerAvailabilityLabel(run, t)}
               </span>
             )}
           </div>
@@ -1034,6 +1141,7 @@ function ReviewDetailsDrawer({
   isSending: boolean;
   onSendFeedback: (run: DashboardReviewRun) => void;
 }) {
+  const { t } = useI18n();
   const { run, findings, loading, error } = state;
   const workerHref = projectDashboardSessionPath(run.projectId, run.linkedSessionId);
   const feedbackHref = projectSessionHashPath(
@@ -1064,14 +1172,14 @@ function ReviewDetailsDrawer({
             type="button"
             className="review-detail-panel__close"
             onClick={onClose}
-            aria-label="Close review details"
+            aria-label={t("review.closeDetails")}
           >
             x
           </button>
         </div>
 
         <div className="review-detail-panel__meta">
-          <span>{formatStatus(run.status)}</span>
+          <span>{formatStatus(run.status, t)}</span>
           <span>{run.linkedSessionId}</span>
           {run.workerBranch ? <span>{run.workerBranch}</span> : null}
           {run.prNumber ? <span>PR #{run.prNumber}</span> : null}
@@ -1079,49 +1187,49 @@ function ReviewDetailsDrawer({
 
         <div className="review-detail-panel__actions">
           <Link href={workerHref} onClick={onOpenWorker}>
-            Open worker
+            {t("review.openWorker")}
           </Link>
           {run.workerPrUrl ? (
             <a href={run.workerPrUrl} target="_blank" rel="noreferrer">
-              Open PR
+              {t("review.openPr")}
             </a>
           ) : null}
-          {feedbackAvailable ? <Link href={feedbackHref}>Open terminal</Link> : null}
+          {feedbackAvailable ? <Link href={feedbackHref}>{t("review.openTerminal")}</Link> : null}
           {feedbackAvailable && openFindings.length > 0 ? (
             <button type="button" disabled={isSending} onClick={() => onSendFeedback(run)}>
-              {isSending ? "Sending feedback" : "Send feedback"}
+              {isSending ? t("review.sendingFeedback") : t("review.sendFeedback")}
             </button>
           ) : null}
         </div>
 
         {!feedbackAvailable ? (
           <div className="review-detail-panel__notice">
-            Worker feedback is unavailable because the linked worker is{" "}
-            {getWorkerAvailabilityLabel(run)}. Open the worker card to inspect or restore it before
-            sending review findings back.
+            {t("review.feedbackUnavailable", { state: getWorkerAvailabilityLabel(run, t) })}
           </div>
         ) : null}
 
         <div className="review-detail-panel__summary">
           <div className="review-detail-panel__summary-item">
-            <span>Open</span>
+            <span>{t("review.open")}</span>
             <strong>{openFindings.length || run.openFindingCount}</strong>
           </div>
           <div className="review-detail-panel__summary-item">
-            <span>Total</span>
+            <span>{t("review.total")}</span>
             <strong>{run.findingCount}</strong>
           </div>
           <div className="review-detail-panel__summary-item">
-            <span>Updated</span>
-            <strong>{formatRelativeTime(run.updatedAt)}</strong>
+            <span>{t("review.updated")}</span>
+            <strong>{formatRelativeTime(run.updatedAt, t)}</strong>
           </div>
         </div>
 
         <div className="review-detail-panel__content">
-          {loading ? <div className="review-detail-panel__empty">Loading findings...</div> : null}
+          {loading ? (
+            <div className="review-detail-panel__empty">{t("review.loadingFindings")}</div>
+          ) : null}
           {error ? <div className="review-detail-panel__error">{error}</div> : null}
           {!loading && !error && findings.length === 0 ? (
-            <div className="review-detail-panel__empty">No findings captured for this run.</div>
+            <div className="review-detail-panel__empty">{t("review.noFindings")}</div>
           ) : null}
           {!loading && !error
             ? findings.map((finding) => {
@@ -1133,8 +1241,8 @@ function ReviewDetailsDrawer({
                     data-severity={finding.severity}
                   >
                     <div className="review-detail-finding__header">
-                      <span>{finding.severity}</span>
-                      <span>{formatStatus(finding.status)}</span>
+                      <span>{formatSeverity(finding.severity, t)}</span>
+                      <span>{formatFindingStatus(finding.status, t)}</span>
                     </div>
                     <h3>{finding.title}</h3>
                     {location ? <code>{location}</code> : null}
