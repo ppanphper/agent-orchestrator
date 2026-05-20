@@ -218,6 +218,12 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Always loads global config (`~/.agent-orchestrator/config.yaml`) to see all projects — local config only has the cwd project
 - Records `LastStopState` with `otherProjects` field for cross-project session restore
 
+### Service restart safety
+- Service/dashboard restart is not project stop/start. `ao stop <project>` is a session-killing command, not a dashboard restart.
+- Current CLI commands do not provide a guaranteed service-only daemon restart while active sessions are running. Do not use `ao stop`, `ao stop <project>`, Ctrl+C, or SIGTERM as a service restart unless there are no active sessions or the user explicitly accepts terminating them.
+- Before any AO restart, read `docs/AO_SERVICE_RESTART.md` and the checked-in `skills/ao-service-restart/SKILL.md`.
+- A future dashboard restart button must distinguish dashboard child restart, AO daemon/supervisor restart, and project session stop; it must not wrap `ao stop`.
+
 ### Dashboard sidebar
 - Sidebar always shows sessions from ALL projects regardless of which project page is active
 - `useSessionEvents` in Dashboard.tsx is called without project filter — sidebar gets unscoped sessions

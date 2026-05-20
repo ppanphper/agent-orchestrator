@@ -49,6 +49,14 @@ Agents working on this repo should use these checked-in skills:
 
 **Always pull latest main before triaging.** Stale code = bad triage. No exceptions.
 
+### AO Service Restart (`skills/ao-service-restart/`)
+
+**When to use:** Any time a user asks to restart AO, restart the dashboard, fix a stale/missing `running.json`, repair lifecycle polling, or diagnose sessions stuck because PR state did not sync.
+
+**Critical rule:** Do not use `ao stop <project>` as a dashboard/service restart. It kills that project's active sessions and leaves the parent dashboard process serving other projects. Do not use `ao stop` or SIGTERM to the `ao start` parent unless there are no active sessions or the user explicitly accepts terminating them.
+
+**How to load:** Read `skills/ao-service-restart/SKILL.md` and `docs/AO_SERVICE_RESTART.md` before touching AO processes.
+
 ## Key Files
 
 - `packages/core/src/types.ts` — All plugin interfaces (Agent, Runtime, Workspace, etc.)
@@ -67,6 +75,7 @@ Agents working on this repo should use these checked-in skills:
 - Ctrl+C on `ao start` performs full graceful shutdown (same as `ao stop`)
 - `LastStopState` includes `otherProjects` for cross-project session restore on next `ao start`
 - Dashboard sidebar always shows ALL projects' sessions regardless of active project view
+- Service/dashboard restart is not the same as project stop/start. Follow `docs/AO_SERVICE_RESTART.md`; never use `ao stop <project>` to restart dashboard or lifecycle polling.
 
 ## Cross-Platform (Windows) Compatibility
 

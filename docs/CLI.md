@@ -8,7 +8,7 @@ The `ao` CLI is the control interface for Agent Orchestrator. Most commands are 
 ao start                               # Auto-detect, generate config, start dashboard + orchestrator
 ao start <url>                         # Clone repo, auto-configure, and start
 ao start ~/other-repo                  # Add a new project and start
-ao stop                                # Stop everything (dashboard, orchestrator, lifecycle worker)
+ao stop                                # Stop everything; kills active sessions, dashboard, lifecycle worker
 ao status                              # Overview of all sessions
 ao status --watch                      # Live-updating terminal status view
 ao dashboard                           # Open web dashboard in browser
@@ -17,6 +17,10 @@ ao setup desktop                       # Install/configure native macOS desktop 
 ao notify test --to desktop            # Send a manual notifier test without starting AO
 ao completion zsh                      # Print the zsh completion script
 ```
+
+`ao stop` and `ao stop <project>` are not service restart commands. They kill
+sessions. For dashboard/daemon/lifecycle restart decisions, follow
+[`docs/AO_SERVICE_RESTART.md`](AO_SERVICE_RESTART.md).
 
 ## Commands the orchestrator agent uses
 

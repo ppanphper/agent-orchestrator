@@ -7,6 +7,7 @@ Reusable skill documents for AI coding agents working on this repository. Each s
 | Skill | Description |
 |-------|-------------|
 | [`bug-triage/`](bug-triage/SKILL.md) | Triage bugs reported in chat/issues — investigate, search duplicates, file GitHub issues, push fix PRs |
+| [`ao-service-restart/`](ao-service-restart/SKILL.md) | Safely diagnose and restart AO service/dashboard/lifecycle state without accidentally killing project sessions |
 | [`agent-orchestrator/`](agent-orchestrator/SKILL.md) | Architecture and conventions for working on the agent-orchestrator codebase |
 | [`release-notes/`](release-notes/ao-weekly-release/SKILL.md) | Generate weekly release notes from git history |
 | [`social-media/`](social-media/SKILL.md) | Social media post generation |
