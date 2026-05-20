@@ -2196,15 +2196,19 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       return;
     }
 
-    // Only check for conflicts on open PRs
-    if (
-      newStatus !== "pr_open" &&
-      newStatus !== "ci_failed" &&
-      newStatus !== "review_pending" &&
-      newStatus !== "changes_requested" &&
-      newStatus !== "approved" &&
-      newStatus !== "mergeable"
-    ) {
+    const canReceiveConflictWork =
+      newStatus === "pr_open" ||
+      newStatus === "ci_failed" ||
+      newStatus === "review_pending" ||
+      newStatus === "changes_requested" ||
+      newStatus === "approved" ||
+      newStatus === "mergeable" ||
+      // Legacy status prioritizes session health over PR state. A stuck but
+      // live worker can still have an open PR that needs conflict remediation.
+      (newStatus === "stuck" && session.lifecycle.runtime.state === "alive");
+
+    // Only check for conflicts on open PRs that can still receive remediation.
+    if (!canReceiveConflictWork) {
       return;
     }
 

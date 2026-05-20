@@ -2623,6 +2623,51 @@ describe("reactions", () => {
     );
   });
 
+  it("dispatches merge conflict notification for stuck sessions with live runtimes", async () => {
+    config.reactions = {
+      ...config.reactions,
+      "merge-conflicts": {
+        auto: true,
+        action: "send-to-agent",
+        message: "Resolve merge conflicts.",
+      },
+      "agent-stuck": {
+        auto: true,
+        action: "notify",
+        threshold: "10m",
+      },
+    };
+
+    vi.mocked(plugins.agent.getActivityState).mockResolvedValue({
+      state: "idle",
+      timestamp: new Date(Date.now() - 11 * 60 * 1000),
+    });
+
+    const mockSCM = createMockSCM({
+      enrichSessionsPRBatch: mockBatchEnrichment({
+        hasConflicts: true,
+        mergeable: false,
+      }),
+    });
+    const registry = createMockRegistry({
+      runtime: plugins.runtime,
+      agent: plugins.agent,
+      scm: mockSCM,
+    });
+
+    vi.mocked(mockSessionManager.send).mockResolvedValue(undefined);
+
+    const lm = setupCheck("app-1", {
+      session: makeSession({ status: "stuck", pr: makeMatchingPR() }),
+      registry,
+    });
+
+    await lm.check("app-1");
+
+    expect(lm.getStates().get("app-1")).toBe("stuck");
+    expect(mockSessionManager.send).toHaveBeenCalledWith("app-1", "Resolve merge conflicts.");
+  });
+
   it("does not re-dispatch merge conflict notification when already dispatched", async () => {
     config.reactions = {
       "merge-conflicts": {
