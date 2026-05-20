@@ -3,6 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const BACKLOG_STATE_PATH = "/tmp/backlog-poller.json";
 
+function resetBacklogGlobals(): void {
+  const backlogGlobals = globalThis as typeof globalThis & {
+    _aoBacklogStarted?: unknown;
+    _aoBacklogTimer?: ReturnType<typeof setInterval>;
+    _aoBacklogPollInFlight?: unknown;
+  };
+  if (backlogGlobals._aoBacklogTimer) {
+    clearInterval(backlogGlobals._aoBacklogTimer);
+  }
+  delete backlogGlobals._aoBacklogStarted;
+  delete backlogGlobals._aoBacklogTimer;
+  delete backlogGlobals._aoBacklogPollInFlight;
+}
+
 const {
   mockLoadConfig,
   mockGetGlobalConfigPath,
@@ -101,20 +115,14 @@ describe("services", () => {
     mockCreateSessionManager.mockReturnValue({});
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
-    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
-    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
-    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
-      ._aoBacklogPollInFlight;
+    resetBacklogGlobals();
     rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   afterEach(() => {
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
-    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
-    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
-    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
-      ._aoBacklogPollInFlight;
+    resetBacklogGlobals();
     rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
@@ -218,20 +226,14 @@ describe("pollBacklog", () => {
 
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
-    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
-    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
-    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
-      ._aoBacklogPollInFlight;
+    resetBacklogGlobals();
     rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
   afterEach(() => {
     delete (globalThis as typeof globalThis & { _aoServices?: unknown })._aoServices;
     delete (globalThis as typeof globalThis & { _aoServicesInit?: unknown })._aoServicesInit;
-    delete (globalThis as typeof globalThis & { _aoBacklogStarted?: unknown })._aoBacklogStarted;
-    delete (globalThis as typeof globalThis & { _aoBacklogTimer?: unknown })._aoBacklogTimer;
-    delete (globalThis as typeof globalThis & { _aoBacklogPollInFlight?: unknown })
-      ._aoBacklogPollInFlight;
+    resetBacklogGlobals();
     rmSync(BACKLOG_STATE_PATH, { force: true });
   });
 
@@ -310,6 +312,28 @@ describe("pollBacklog", () => {
 
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockUpdateIssue).not.toHaveBeenCalled();
+  });
+
+  it("does not report a persisted unpaused project as running after process restart", async () => {
+    writeFileSync(
+      BACKLOG_STATE_PATH,
+      JSON.stringify({
+        paused: false,
+        maxConcurrent: 5,
+        projects: {
+          "test-project": { paused: false, maxConcurrent: 3 },
+        },
+      }),
+      "utf8",
+    );
+
+    const { getBacklogPollerStatus } = await import("../lib/services");
+
+    expect(getBacklogPollerStatus("test-project")).toEqual({
+      running: false,
+      paused: false,
+      maxConcurrent: 3,
+    });
   });
 
   it("allows a manual claim cycle while the backlog poller is paused", async () => {
@@ -424,6 +448,96 @@ describe("pollBacklog", () => {
     expect(mockSpawn).not.toHaveBeenCalledWith({
       projectId: "other-project",
       issueId: "999",
+    });
+  });
+
+  it("keeps the global backlog poller alive when one project is stopped", async () => {
+    mockLoadConfig.mockReturnValue({
+      configPath: "/tmp/agent-orchestrator.yaml",
+      port: 3000,
+      readyThresholdMs: 300_000,
+      defaults: { runtime: "tmux", agent: "claude-code", workspace: "worktree", notifiers: [] },
+      projects: {
+        "test-project": {
+          path: "/tmp/test-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+        "other-project": {
+          path: "/tmp/other-project",
+          tracker: { plugin: "github" },
+          backlog: { label: "agent:backlog", maxConcurrent: 5 },
+        },
+      },
+      notifiers: {},
+      notificationRouting: { urgent: [], action: [], warning: [], info: [] },
+      reactions: {},
+    });
+    mockListIssues.mockImplementation((_filters, project) =>
+      Promise.resolve([
+        {
+          id: project.path.includes("other-project") ? "999" : "123",
+          title: project.path.includes("other-project") ? "Other Issue" : "Test Issue",
+          description: "Test description",
+          url: `https://github.com/test/test/issues/${
+            project.path.includes("other-project") ? "999" : "123"
+          }`,
+          state: "open",
+          labels: ["agent:backlog"],
+        },
+      ]),
+    );
+
+    mockRegistry.get.mockImplementation((slot: string) => {
+      if (slot === "tracker") {
+        return {
+          name: "github",
+          listIssues: mockListIssues,
+          updateIssue: mockUpdateIssue,
+        };
+      }
+      return null;
+    });
+
+    writeFileSync(
+      BACKLOG_STATE_PATH,
+      JSON.stringify({
+        paused: false,
+        maxConcurrent: 5,
+        projects: {
+          "test-project": { paused: false, maxConcurrent: 5 },
+          "other-project": { paused: false, maxConcurrent: 5 },
+        },
+      }),
+      "utf8",
+    );
+    const backlogGlobals = globalThis as typeof globalThis & {
+      _aoBacklogStarted?: boolean;
+      _aoBacklogTimer?: ReturnType<typeof setInterval>;
+    };
+    backlogGlobals._aoBacklogStarted = true;
+    backlogGlobals._aoBacklogTimer = setInterval(() => undefined, 60_000);
+
+    const { getBacklogPollerStatus, stopBacklogPoller, pollBacklog } =
+      await import("../lib/services");
+
+    stopBacklogPoller("test-project");
+    await pollBacklog();
+
+    expect(getBacklogPollerStatus("test-project")).toEqual({
+      running: false,
+      paused: true,
+      maxConcurrent: 5,
+    });
+    expect(getBacklogPollerStatus("other-project")).toEqual({
+      running: true,
+      paused: false,
+      maxConcurrent: 5,
+    });
+    expect(mockSpawn).toHaveBeenCalledWith({ projectId: "other-project", issueId: "999" });
+    expect(mockSpawn).not.toHaveBeenCalledWith({
+      projectId: "test-project",
+      issueId: "123",
     });
   });
 

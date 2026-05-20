@@ -135,6 +135,49 @@ describe("BacklogPanel", () => {
     expect(await screen.findByText("Paused")).toBeInTheDocument();
   });
 
+  it("shows a stopped poller as startable after the server restarts", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          poller: { running: false, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          issues: [],
+          poller: { running: false, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ poller: { running: true, paused: false, maxConcurrent: 5 } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          issues: [],
+          poller: { running: true, paused: false, maxConcurrent: 5 },
+        }),
+      } as Response);
+
+    render(<BacklogPanel projectId="app" />);
+
+    expect(await screen.findByText("Not running")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start backlog poller" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/backlog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", projectId: "app" }),
+      });
+    });
+    expect(await screen.findByRole("button", { name: "Stop backlog poller" })).toBeInTheDocument();
+  });
+
   it("can run a manual claim cycle", async () => {
     fetchMock
       .mockResolvedValueOnce({

@@ -278,12 +278,25 @@ function normalizeMaxConcurrent(value: unknown): number {
   return Math.max(1, Math.min(value, 50));
 }
 
+function isBacklogPollerRuntimeActive(): boolean {
+  return globalForBacklog._aoBacklogStarted === true && Boolean(globalForBacklog._aoBacklogTimer);
+}
+
+function stopBacklogPollerRuntime(): void {
+  if (globalForBacklog._aoBacklogTimer) {
+    clearInterval(globalForBacklog._aoBacklogTimer);
+    globalForBacklog._aoBacklogTimer = undefined;
+  }
+  globalForBacklog._aoBacklogStarted = false;
+}
+
 /** Return current backlog poller state. */
 export function getBacklogPollerStatus(projectId?: string): BacklogPollerStatus {
   const state = readBacklogPollerState();
   const effectiveState = projectId ? getProjectBacklogPollerState(state, projectId) : state;
+  const runtimeActive = isBacklogPollerRuntimeActive();
   return {
-    running: globalForBacklog._aoBacklogStarted === true,
+    running: runtimeActive && effectiveState.paused !== true,
     paused: effectiveState.paused,
     maxConcurrent: effectiveState.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_AGENTS,
   };
@@ -312,7 +325,10 @@ export function startBacklogPoller(projectId?: string): void {
   } else if (state.paused) {
     return;
   }
-  if (globalForBacklog._aoBacklogStarted) return;
+  if (isBacklogPollerRuntimeActive()) {
+    if (projectId) void runBacklogClaimCycle(projectId);
+    return;
+  }
   globalForBacklog._aoBacklogStarted = true;
 
   // Run immediately, then on interval
@@ -326,11 +342,7 @@ export function stopBacklogPoller(projectId?: string): BacklogPollerStatus {
     updateProjectBacklogPollerState(projectId, { paused: true });
     return getBacklogPollerStatus(projectId);
   }
-  if (globalForBacklog._aoBacklogTimer) {
-    clearInterval(globalForBacklog._aoBacklogTimer);
-    globalForBacklog._aoBacklogTimer = undefined;
-  }
-  globalForBacklog._aoBacklogStarted = false;
+  stopBacklogPollerRuntime();
   updateBacklogPollerState({ paused: true });
   return getBacklogPollerStatus();
 }

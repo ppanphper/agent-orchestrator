@@ -42,6 +42,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
   const [setupSummary, setSetupSummary] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [pollerPaused, setPollerPaused] = useState(false);
+  const [pollerRunning, setPollerRunning] = useState(false);
   const [maxConcurrent, setMaxConcurrent] = useState(5);
 
   const projectIssues = useMemo(
@@ -51,6 +52,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
 
   const applyPoller = useCallback((data: BacklogResponse | null) => {
     setPollerPaused(data?.poller?.paused === true);
+    setPollerRunning(data?.poller?.running === true);
     setMaxConcurrent(data?.poller?.maxConcurrent ?? 5);
   }, []);
 
@@ -169,7 +171,7 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
             data?.error ?? t("backlog.concurrencyUpdateFailed", { status: response.status }),
           );
         }
-        setPollerPaused(data?.poller?.paused === true);
+        applyPoller(data);
         setMaxConcurrent(data?.poller?.maxConcurrent ?? normalized);
       } catch (err) {
         setError(err instanceof Error ? err.message : t("backlog.updateConcurrencyFailed"));
@@ -177,8 +179,10 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         setSavingMaxConcurrent(false);
       }
     },
-    [projectId, t],
+    [applyPoller, projectId, t],
   );
+
+  const pollerActive = pollerRunning && !pollerPaused;
 
   useEffect(() => {
     void refreshStatus();
@@ -250,6 +254,8 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
           <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
             {pollerPaused
               ? t("backlog.paused")
+              : !pollerRunning
+                ? t("backlog.stopped")
               : lastRefreshedAt
                 ? t("backlog.lastRefresh", { time: lastRefreshedAt })
                 : t("backlog.ready")}
@@ -316,11 +322,11 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
         <button
           type="button"
           className={
-            pollerPaused ? "dashboard-app-btn dashboard-app-btn--amber" : "dashboard-app-btn"
+            pollerActive ? "dashboard-app-btn" : "dashboard-app-btn dashboard-app-btn--amber"
           }
-          onClick={() => void setPoller(pollerPaused ? "start" : "stop")}
+          onClick={() => void setPoller(pollerActive ? "stop" : "start")}
           disabled={loading}
-          aria-label={pollerPaused ? t("backlog.startPoller") : t("backlog.stopPoller")}
+          aria-label={pollerActive ? t("backlog.stopPoller") : t("backlog.startPoller")}
         >
           <svg
             width="12"
@@ -331,9 +337,9 @@ export function BacklogPanel({ projectId }: BacklogPanelProps) {
             viewBox="0 0 24 24"
             aria-hidden="true"
           >
-            {pollerPaused ? <path d="m8 5 11 7-11 7V5Z" /> : <path d="M8 5v14M16 5v14" />}
+            {pollerActive ? <path d="M8 5v14M16 5v14" /> : <path d="m8 5 11 7-11 7V5Z" />}
           </svg>
-          {pollerPaused ? t("backlog.start") : t("backlog.stop")}
+          {pollerActive ? t("backlog.stop") : t("backlog.start")}
         </button>
         <button
           type="button"

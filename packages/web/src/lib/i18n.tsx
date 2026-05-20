@@ -351,6 +351,7 @@ const en = {
   backlog: {
     title: "Backlog",
     paused: "Paused",
+    stopped: "Not running",
     ready: "Ready",
     lastRefresh: "Last refresh {time}",
     max: "Max",
@@ -959,6 +960,7 @@ const zhCN: Dictionary = {
   backlog: {
     title: "待办",
     paused: "已暂停",
+    stopped: "未启动",
     ready: "就绪",
     lastRefresh: "上次刷新 {time}",
     max: "上限",
