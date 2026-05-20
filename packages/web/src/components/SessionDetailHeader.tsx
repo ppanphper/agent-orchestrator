@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { type DashboardSession, type DashboardPR, isPRMergeReady } from "@/lib/types";
 import type { ProjectInfo } from "@/lib/project-name";
 import { useI18n } from "@/lib/i18n";
+import { DashboardNotificationButton } from "./DashboardNotificationButton";
 import { SessionDetailPRCard } from "./SessionDetailPRCard";
 import { askAgentToFix } from "./session-detail-agent-actions";
 import { buildGitHubBranchUrl } from "./session-detail-utils";
@@ -216,6 +217,7 @@ export function SessionDetailHeader({
       <span className="dashboard-app-header__session-id topbar-desktop-only">{session.id}</span>
       <div className="dashboard-app-header__spacer" />
       <div className="dashboard-app-header__actions">
+        <DashboardNotificationButton />
         {pr ? (
           <div className="topbar-pr-btn-wrap" ref={prPopoverRef}>
             <a
