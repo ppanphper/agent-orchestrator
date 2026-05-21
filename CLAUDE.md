@@ -210,6 +210,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ### ao start
 - Registers in `running.json` (PID, port, projects)
 - Offers to restore sessions from `last-stop.json` — includes cross-project sessions via `otherProjects` field
+- `ao start --restore` restores `last-stop.json` without prompting; `ao start --no-restore` skips restore
 - **Ctrl+C performs full graceful shutdown** (same as ao stop): kills all sessions, writes last-stop state, unregisters from running.json. 10s hard timeout guarantees exit.
 
 ### ao stop
@@ -223,6 +224,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Current CLI commands do not provide a guaranteed service-only daemon restart while active sessions are running. Do not use `ao stop`, `ao stop <project>`, Ctrl+C, or SIGTERM as a service restart unless there are no active sessions or the user explicitly accepts terminating them.
 - Before any AO restart, read `docs/AO_SERVICE_RESTART.md` and the checked-in `skills/ao-service-restart/SKILL.md`.
 - A future dashboard restart button must distinguish dashboard child restart, AO daemon/supervisor restart, and project session stop; it must not wrap `ao stop`.
+
+### ao update
+- For package-manager installs, `ao update` pauses a running AO via `ao stop --yes`, runs the global package update, verifies `ao --version`, then restarts with `ao start --restore` (or `--no-restore` if requested)
+- Failed package-manager updates must report that AO was not updated, include actionable remediation, and restart the previous installation if AO was paused
 
 ### Dashboard sidebar
 - Sidebar always shows sessions from ALL projects regardless of which project page is active
