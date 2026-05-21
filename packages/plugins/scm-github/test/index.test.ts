@@ -1112,6 +1112,29 @@ describe("scm-github plugin", () => {
       });
     });
 
+    it("treats gh's no-checks-reported response as no CI checks", async () => {
+      mockGh({ state: "OPEN" });
+      mockGh({
+        mergeable: "MERGEABLE",
+        reviewDecision: "APPROVED",
+        mergeStateStatus: "CLEAN",
+        isDraft: false,
+      });
+      const err = Object.assign(new Error("Command failed with exit code 1"), {
+        stderr: "no checks reported on the 'feat/my-feature' branch",
+      });
+      ghMock.mockRejectedValueOnce(err);
+
+      const result = await scm.getMergeability(pr);
+      expect(result).toEqual({
+        mergeable: true,
+        ciPassing: true,
+        approved: true,
+        noConflicts: true,
+        blockers: [],
+      });
+    });
+
     it("reports CI failures as blockers", async () => {
       mockGh({ state: "OPEN" }); // getPRState
       mockGh({

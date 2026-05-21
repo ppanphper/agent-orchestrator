@@ -141,6 +141,21 @@ function isUnsupportedPrChecksJsonError(err: unknown): boolean {
   return /pr checks/i.test(err.message) && /unknown json field/i.test(err.message);
 }
 
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const parts = [err.message];
+  const stdout = (err as { stdout?: unknown }).stdout;
+  const stderr = (err as { stderr?: unknown }).stderr;
+  if (typeof stdout === "string") parts.push(stdout);
+  if (typeof stderr === "string") parts.push(stderr);
+  if (err.cause) parts.push(errorText(err.cause));
+  return parts.join("\n");
+}
+
+function isNoChecksReportedError(err: unknown): boolean {
+  return /no checks reported/i.test(errorText(err));
+}
+
 function mapRawCheckStateToStatus(rawState: string | undefined): CICheck["status"] {
   const state = (rawState ?? "").toUpperCase();
   if (state === "IN_PROGRESS") return "running";
@@ -888,6 +903,9 @@ function createGitHubSCM(): SCM {
             };
           });
         } catch (err) {
+          if (isNoChecksReportedError(err)) {
+            return [];
+          }
           if (isUnsupportedPrChecksJsonError(err)) {
             return getCIChecksFromStatusRollup(pr);
           }
