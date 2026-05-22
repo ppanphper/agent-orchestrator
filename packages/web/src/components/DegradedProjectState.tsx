@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { projectDashboardPath } from "@/lib/routes";
 import { useI18n } from "@/lib/i18n";
 import { RepairDegradedProjectButton } from "./RepairDegradedProjectButton";
 
@@ -74,16 +73,10 @@ export function DegradedProjectState({
 
         <div className="mt-6 flex flex-wrap gap-3">
           <Link
-            href={projectDashboardPath(projectId)}
+            href="/"
             className="rounded-lg border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-elevated-hover)]"
           >
-            {t("projects.backToProject")}
-          </Link>
-          <Link
-            href={projectDashboardPath(projectId)}
-            className="rounded-lg border border-[var(--color-border-default)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-elevated-hover)]"
-          >
-            {t("projects.openDashboardView")}
+            {t("common.backToDashboard")}
           </Link>
         </div>
       </div>

@@ -75,7 +75,6 @@ export function SessionDetail({
   const sidebarCtx = useSidebarContext();
   const startFullscreen = searchParams.get("fullscreen") === "true";
   const [showTerminal, setShowTerminal] = useState(false);
-  const [relaunchError, setRelaunchError] = useState<string | null>(null);
   const pr = session.pr;
   const terminalEnded = isDashboardSessionTerminal(session);
   const isRestorable = isDashboardSessionRestorable(session);
@@ -134,45 +133,6 @@ export function SessionDetail({
     }
   }, [session.id]);
 
-  const handleRelaunchClean = useCallback(async () => {
-    const confirmed = window.confirm(t("session.relaunchConfirm"));
-    if (!confirmed) return;
-    setRelaunchError(null);
-    try {
-      const res = await fetch("/api/orchestrators", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: session.projectId, clean: true }),
-      });
-      if (!res.ok) {
-        // Surface server-side errors. Note: a failure here may indicate the
-        // existing orchestrator was killed but respawn failed — the banner
-        // tells the user the previous session was terminated so they don't
-        // assume the page they're looking at is still live.
-        let message = "";
-        try {
-          const data = (await res.json()) as { error?: string };
-          message = data.error ?? "";
-        } catch {
-          message = await res.text().catch(() => "");
-        }
-        throw new Error(message || `HTTP ${res.status}`);
-      }
-      // Hard-navigate to the freshly spawned orchestrator's session page.
-      // Orchestrator session IDs are fixed per project, so this is the same
-      // path in practice — but reading from the response keeps us correct if
-      // the contract ever changes (and a hard nav forces the terminal
-      // WebSocket to reconnect against the new tmux session).
-      const data = (await res.json()) as { orchestrator?: { id: string } };
-      const newId = data.orchestrator?.id ?? session.id;
-      window.location.href = projectSessionPath(session.projectId, newId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t("session.relaunchFailedFallback");
-      console.error("Failed to relaunch orchestrator:", err);
-      setRelaunchError(message);
-    }
-  }, [session.id, session.projectId, t]);
-
   const orchestratorHref = useMemo(() => {
     if (isOrchestrator) return null;
     if (projectOrchestratorId) return projectSessionPath(session.projectId, projectOrchestratorId);
@@ -203,33 +163,8 @@ export function SessionDetail({
         onToggleSidebar={sidebarCtx?.onToggleSidebar ?? (() => {})}
         onRestore={handleRestore}
         onKill={handleKill}
-        onRelaunchClean={isOrchestrator ? handleRelaunchClean : undefined}
       />
       <main className="session-detail-page flex-1 min-h-0 flex flex-col bg-[var(--color-bg-base)]">
-        {relaunchError ? (
-          <div
-            className="border-b border-[color-mix(in_srgb,var(--color-status-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--color-status-error)_10%,transparent)] px-4 py-2 text-[12px] text-[var(--color-status-error)]"
-            role="alert"
-            aria-live="assertive"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="font-semibold">{t("session.relaunchFailed")}</span> {relaunchError}
-                <div className="mt-1 text-[var(--color-text-secondary)]">
-                  {t("session.relaunchFailedHint")}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRelaunchError(null)}
-                className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                aria-label={t("common.dismiss")}
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        ) : null}
         <div className="flex-1 min-h-0 flex flex-col">
           {!showTerminal ? (
             <div className="session-detail-terminal-placeholder h-full" />

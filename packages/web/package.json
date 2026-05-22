@@ -1,6 +1,6 @@
 {
   "name": "@aoagents/ao-web",
-  "version": "0.8.0",
+  "version": "0.9.1",
   "description": "Web dashboard for agent-orchestrator",
   "license": "MIT",
   "type": "module",
@@ -47,6 +47,7 @@
     "@aoagents/ao-plugin-agent-claude-code": "workspace:*",
     "@aoagents/ao-plugin-agent-codex": "workspace:*",
     "@aoagents/ao-plugin-agent-cursor": "workspace:*",
+    "@aoagents/ao-plugin-agent-grok": "workspace:*",
     "@aoagents/ao-plugin-agent-kimicode": "workspace:*",
     "@aoagents/ao-plugin-agent-opencode": "workspace:*",
     "@aoagents/ao-plugin-runtime-process": "workspace:*",
