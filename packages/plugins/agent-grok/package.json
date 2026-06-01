@@ -1,6 +1,6 @@
 {
   "name": "@aoagents/ao-plugin-agent-grok",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agent plugin: Grok",
   "license": "MIT",
   "type": "module",
@@ -25,7 +25,7 @@
     "url": "https://github.com/ComposioHQ/agent-orchestrator/issues"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.18.3"
   },
   "scripts": {
     "build": "tsc",
