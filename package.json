@@ -19,6 +19,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --filter '!@aoagents/ao-web' test",
     "test:integration": "pnpm --filter @aoagents/ao-integration-tests test:integration",
+    "evidence:comment": "node scripts/ao-evidence-comment.mjs",
     "clean": "pnpm -r clean",
     "changeset": "changeset",
     "version-packages": "changeset version",
