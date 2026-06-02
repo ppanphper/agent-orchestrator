@@ -9,8 +9,10 @@ import { getAttentionLevel, type DashboardSession } from "@/lib/types";
 import { isOrchestratorSession } from "@aoagents/ao-core/types";
 import { getSessionTitle, humanizeBranch } from "@/lib/format";
 import { usePopoverClamp } from "@/hooks/usePopoverClamp";
-import { projectDashboardPath, projectReviewPath, projectSessionPath } from "@/lib/routes";
+import { useResizable } from "@/hooks/useResizable";
+import { projectDashboardPath, projectSessionPath } from "@/lib/routes";
 import { ThemeToggle } from "./ThemeToggle";
+import { AppMark } from "./AppMark";
 import { AddProjectModal } from "./AddProjectModal";
 import { ProjectSettingsModal } from "./ProjectSettingsModal";
 import { useI18n, type Locale } from "@/lib/i18n";
@@ -104,6 +106,48 @@ function loadExpandedProjects(): Set<string> | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Brand row at the top of the sidebar: blue mascot mark + wordmark with the
+ * " / " separator dimmed. Mirrors the mockup `.brand`. When a toggle handler is
+ * supplied, a collapse affordance (panel-left icon) sits at the right edge.
+ */
+function SidebarBrand({ onToggleCollapsed }: { onToggleCollapsed?: () => void }) {
+  const { t } = useI18n();
+
+  return (
+    <div className="project-sidebar__brand">
+      <AppMark />
+      <span className="project-sidebar__brand-name">
+        Agent<b className="project-sidebar__brand-sep"> / </b>Orchestrator
+      </span>
+      {onToggleCollapsed ? (
+        <button
+          type="button"
+          className="project-sidebar__collapse-btn"
+          onClick={onToggleCollapsed}
+          title={t("nav.collapseSidebar")}
+          aria-label={t("nav.collapseSidebar")}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16" />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function ProjectSidebar(props: ProjectSidebarProps) {
@@ -240,8 +284,9 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
 
   return (
     <aside className="project-sidebar flex h-full flex-col">
-      <div className="project-sidebar__compact-hdr">
-        <span className="project-sidebar__sect-label">{t("projects.heading")}</span>
+      <SidebarBrand />
+      <div className="project-sidebar__nav-label">
+        <span>{t("projects.heading")}</span>
         <button
           type="button"
           className="project-sidebar__add-btn"
@@ -252,7 +297,8 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
             aria-hidden="true"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.8"
+            strokeLinecap="round"
             viewBox="0 0 24 24"
           >
             <path d="M12 5v14M5 12h14" />
@@ -263,7 +309,7 @@ function ProjectSidebarEmpty({ collapsed = false }: { collapsed?: boolean }) {
         {t("projects.noneYet")}
       </div>
       <div className="project-sidebar__footer">
-        <div className="flex items-center justify-end gap-1 border-t border-[var(--color-border-subtle)] px-2 py-2">
+        <div className="project-sidebar__foot-inner">
           <ThemeToggle className="project-sidebar__theme-toggle" />
         </div>
       </div>
@@ -282,12 +328,20 @@ function ProjectSidebarInner({
   error = false,
   onRetry,
   collapsed = false,
-  onToggleCollapsed: _onToggleCollapsed,
+  onToggleCollapsed,
   onMobileClose,
 }: ProjectSidebarProps) {
   const { locale, setLocale, t } = useI18n();
   const router = useRouter();
   const _isLoading = loading || sessions === null;
+  const { onPointerDown: onResizePointerDown, onDoubleClick: onResizeDoubleClick } = useResizable({
+    cssVar: "--ao-sidebar-w",
+    storageKey: "ao-sidebar-w",
+    defaultWidth: 240,
+    min: 200,
+    max: 420,
+    edge: "right",
+  });
 
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
     () =>
@@ -609,6 +663,29 @@ function ProjectSidebarInner({
           "project-sidebar project-sidebar--collapsed flex flex-col h-full items-center py-2 gap-1 overflow-y-auto",
         )}
       >
+        {onToggleCollapsed ? (
+          <button
+            type="button"
+            className="project-sidebar__collapse-btn project-sidebar__expand-btn"
+            onClick={onToggleCollapsed}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <svg
+              width="17"
+              height="17"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <rect x="3" y="4" width="18" height="16" rx="2.5" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+              <path d="m13 9 3 3-3 3" />
+            </svg>
+          </button>
+        ) : null}
         {visibleProjects.map((project, idx) => {
           const workerSessions = sessionsByProject.get(project.id) ?? [];
           // sessionsByProject already applies the showDone filter consistently.
@@ -672,9 +749,10 @@ function ProjectSidebarInner({
   }
 
   return (
-    <aside className="project-sidebar flex h-full flex-col">
-      <div className="project-sidebar__compact-hdr">
-        <span className="project-sidebar__sect-label">{t("projects.heading")}</span>
+    <aside className="project-sidebar relative flex h-full flex-col">
+      <SidebarBrand onToggleCollapsed={onToggleCollapsed} />
+      <div className="project-sidebar__nav-label">
+        <span>{t("projects.heading")}</span>
         <button
           type="button"
           className="project-sidebar__add-btn"
@@ -685,7 +763,8 @@ function ProjectSidebarInner({
             aria-hidden="true"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.8"
+            strokeLinecap="round"
             viewBox="0 0 24 24"
           >
             <path d="M12 5v14M5 12h14" />
@@ -733,7 +812,6 @@ function ProjectSidebarInner({
           const projectHref = projectDashboardPath(project.id);
           // sessionsByProject already applies the showDone filter consistently.
           const visibleSessions = workerSessions;
-          const hasActiveSessions = visibleSessions.length > 0;
           const orchestratorLink = orchestratorByProject.get(project.id) ?? null;
           // Look up the full session object so navigate() can cache it in
           // sessionStorage — prevents the "Session unavailable" flash on
@@ -806,178 +884,152 @@ function ProjectSidebarInner({
                       <path d="m9 18 6-6-6-6" />
                     </svg>
                     <span className="project-sidebar__proj-name">{project.name}</span>
-                    <span
-                      className={cn(
-                        "project-sidebar__proj-badge",
-                        hasActiveSessions && "project-sidebar__proj-badge--active",
-                      )}
-                    >
+                    <span className="project-sidebar__proj-count">
                       {sessionsByProject.get(project.id)?.length ?? 0}
                     </span>
                   </button>
                 )}
 
-                {/* Dashboard button */}
-                {!isDegraded ? (
-                  <Link
-                    href={projectHref}
-                    prefetch={false}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMobileClose?.();
-                    }}
-                    className="project-sidebar__proj-action"
-                    aria-label={t("projects.openDashboard", { project: project.name })}
-                    title={t("projects.dashboardTitle")}
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
+                {/* Row actions — absolutely positioned over the count slot; the
+                    count shows at rest, these reveal on hover (frees name space). */}
+                <div className="project-sidebar__proj-actions">
+                  {/* Dashboard button */}
+                  {!isDegraded ? (
+                    <Link
+                      href={projectHref}
+                      prefetch={false}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMobileClose?.();
+                      }}
+                      className="project-sidebar__proj-action"
+                      aria-label={t("projects.openDashboard", { project: project.name })}
+                      title={t("projects.dashboardTitle")}
                     >
-                      <path d="M3 13h8V3H3zm10 8h8V11h-8zM3 21h8v-6H3zm10-10h8V3h-8z" />
-                    </svg>
-                  </Link>
-                ) : null}
+                      <svg
+                        width="12"
+                        height="12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M3 13h8V3H3zm10 8h8V11h-8zM3 21h8v-6H3zm10-10h8V3h-8z" />
+                      </svg>
+                    </Link>
+                  ) : null}
 
-                {!isDegraded ? (
-                  <Link
-                    href={projectReviewPath(project.id)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMobileClose?.();
-                    }}
-                    className="project-sidebar__proj-action"
-                    aria-label={`Open ${project.name} reviews`}
-                    title="Reviews"
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
+                  {!isDegraded && orchestratorLink && (
+                    <a
+                      href={projectSessionPath(project.id, orchestratorLink.id)}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigate(
+                          projectSessionPath(project.id, orchestratorLink.id),
+                          orchestratorSession ?? undefined,
+                        );
+                      }}
+                      className="project-sidebar__proj-action"
+                      aria-label={t("projects.openOrchestrator", { project: project.name })}
+                      title={t("dashboard.orchestrator")}
                     >
-                      <path d="M9 11l2 2 4-4" />
-                      <path d="M5 4h14v16H5z" />
-                    </svg>
-                  </Link>
-                ) : null}
+                      <svg
+                        width="12"
+                        height="12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
+                        <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
+                        <circle cx="6" cy="17" r="2" />
+                        <circle cx="12" cy="17" r="2" />
+                        <circle cx="18" cy="17" r="2" />
+                      </svg>
+                    </a>
+                  )}
 
-                {!isDegraded && orchestratorLink && (
-                  <a
-                    href={projectSessionPath(project.id, orchestratorLink.id)}
-                    onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      navigate(
-                        projectSessionPath(project.id, orchestratorLink.id),
-                        orchestratorSession ?? undefined,
-                      );
-                    }}
-                    className="project-sidebar__proj-action"
-                    aria-label={t("projects.openOrchestrator", { project: project.name })}
-                    title={t("dashboard.orchestrator")}
+                  <div
+                    className="project-sidebar__proj-menu"
+                    ref={projectMenuOpenId === project.id ? projectMenuRef : undefined}
                   >
-                    <svg
-                      width="12"
-                      height="12"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setProjectMenuOpenId((current) =>
+                          current === project.id ? null : project.id,
+                        );
+                      }}
+                      className="project-sidebar__proj-action project-sidebar__proj-action--menu"
+                      aria-label={t("projects.projectActionsFor", { project: project.name })}
+                      aria-expanded={projectMenuOpenId === project.id}
+                      aria-haspopup="menu"
+                      title={t("projects.projectActions")}
                     >
-                      <circle cx="12" cy="5" r="2" fill="currentColor" stroke="none" />
-                      <path d="M12 7v4M12 11H6M12 11h6M6 11v3M12 11v3M18 11v3" />
-                      <circle cx="6" cy="17" r="2" />
-                      <circle cx="12" cy="17" r="2" />
-                      <circle cx="18" cy="17" r="2" />
-                    </svg>
-                  </a>
-                )}
-
-                <div
-                  className="project-sidebar__proj-menu"
-                  ref={projectMenuOpenId === project.id ? projectMenuRef : undefined}
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setProjectMenuOpenId((current) =>
-                        current === project.id ? null : project.id,
-                      );
-                    }}
-                    className="project-sidebar__proj-action project-sidebar__proj-action--menu"
-                    aria-label={t("projects.projectActionsFor", { project: project.name })}
-                    aria-expanded={projectMenuOpenId === project.id}
-                    aria-haspopup="menu"
-                    title={t("projects.projectActions")}
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <circle cx="12" cy="5" r="1.75" />
-                      <circle cx="12" cy="12" r="1.75" />
-                      <circle cx="12" cy="19" r="1.75" />
-                    </svg>
-                  </button>
-                  {projectMenuOpenId === project.id ? (
-                    <div
-                      ref={projectMenuPopoverRef}
-                      className="project-sidebar__proj-menu-popover"
-                      role="menu"
-                      aria-label={t("projects.actionsFor", { project: project.name })}
-                    >
-                      {orchestratorLink ? (
+                      <svg
+                        width="12"
+                        height="12"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="5" r="1.75" />
+                        <circle cx="12" cy="12" r="1.75" />
+                        <circle cx="12" cy="19" r="1.75" />
+                      </svg>
+                    </button>
+                    {projectMenuOpenId === project.id ? (
+                      <div
+                        ref={projectMenuPopoverRef}
+                        className="project-sidebar__proj-menu-popover"
+                        role="menu"
+                        aria-label={t("projects.actionsFor", { project: project.name })}
+                      >
+                        {orchestratorLink ? (
+                          <button
+                            type="button"
+                            className="project-sidebar__proj-menu-item"
+                            role="menuitem"
+                            onClick={() => {
+                              setProjectMenuOpenId(null);
+                              navigate(
+                                projectSessionPath(project.id, orchestratorLink.id),
+                                orchestratorSession ?? undefined,
+                              );
+                            }}
+                          >
+                            {t("projects.openOrchestratorAction")}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="project-sidebar__proj-menu-item"
                           role="menuitem"
                           onClick={() => {
                             setProjectMenuOpenId(null);
-                            navigate(
-                              projectSessionPath(project.id, orchestratorLink.id),
-                              orchestratorSession ?? undefined,
-                            );
+                            setProjectSettingsProjectId(project.id);
                           }}
                         >
-                          {t("projects.openOrchestratorAction")}
+                          {t("projects.projectSettings")}
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="project-sidebar__proj-menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          setProjectMenuOpenId(null);
-                          setProjectSettingsProjectId(project.id);
-                        }}
-                      >
-                        {t("projects.projectSettings")}
-                      </button>
-                      <button
-                        type="button"
-                        className="project-sidebar__proj-menu-item project-sidebar__proj-menu-item--danger"
-                        role="menuitem"
-                        onClick={() => void handleRemoveProject(project)}
-                        disabled={deletingProjectId === project.id}
-                      >
-                        {deletingProjectId === project.id
-                          ? t("projects.removing")
-                          : t("projects.removeProject")}
-                      </button>
-                    </div>
-                  ) : null}
+                        <button
+                          type="button"
+                          className="project-sidebar__proj-menu-item project-sidebar__proj-menu-item--danger"
+                          role="menuitem"
+                          onClick={() => void handleRemoveProject(project)}
+                          disabled={deletingProjectId === project.id}
+                        >
+                          {deletingProjectId === project.id
+                            ? t("projects.removing")
+                            : t("projects.removeProject")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
@@ -1078,68 +1130,15 @@ function ProjectSidebarInner({
         })}
       </div>
       <div className="project-sidebar__footer">
-        <div className="flex items-center gap-1 border-t border-[var(--color-border-subtle)] px-2 py-2">
-          {/* Show killed toggle */}
-          <button
-            type="button"
-            onClick={() => setShowKilled(!showKilled)}
-            className={cn(
-              "project-sidebar__footer-btn",
-              showKilled && "project-sidebar__footer-btn--active",
-            )}
-            aria-pressed={showKilled}
-            title={showKilled ? t("projects.hideKilled") : t("projects.showKilled")}
-            aria-label={showKilled ? t("projects.hideKilled") : t("projects.showKilled")}
-          >
-            {/* skull / terminated icon */}
-            <svg
-              width="13"
-              height="13"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M12 3C7.03 3 3 7.03 3 12c0 3.1 1.5 5.84 3.8 7.55V21h2.4v-1h1.6v1h2.4v-1h1.6v1H17v-1.45A9 9 0 0 0 21 12c0-4.97-4.03-9-9-9z" />
-              <circle cx="9" cy="11" r="1.5" fill="currentColor" stroke="none" />
-              <circle cx="15" cy="11" r="1.5" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-          {/* Show done toggle */}
-          <button
-            type="button"
-            onClick={() => setShowDone(!showDone)}
-            className={cn(
-              "project-sidebar__footer-btn",
-              showDone && "project-sidebar__footer-btn--active",
-            )}
-            aria-pressed={showDone}
-            title={showDone ? t("projects.hideCompleted") : t("projects.showCompleted")}
-            aria-label={showDone ? t("projects.hideCompleted") : t("projects.showCompleted")}
-          >
-            {/* checkmark / done icon */}
-            <svg
-              width="13"
-              height="13"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          </button>
-          <div className="flex-1" />
-          {/* Sidebar display settings (gear) */}
+        <div className="project-sidebar__foot-inner">
+          {/* Single Settings gear — opens a popover holding all display toggles. */}
           <div className="project-sidebar__settings-wrap" ref={settingsRef}>
             <button
               type="button"
               onClick={() => setSettingsOpen((v) => !v)}
               className={cn(
-                "project-sidebar__footer-btn",
-                settingsOpen && "project-sidebar__footer-btn--active",
+                "project-sidebar__foot-btn",
+                settingsOpen && "project-sidebar__foot-btn--active",
               )}
               aria-expanded={settingsOpen}
               aria-haspopup="dialog"
@@ -1147,17 +1146,20 @@ function ProjectSidebarInner({
               aria-label={t("projects.sidebarSettings")}
             >
               <svg
-                width="13"
-                height="13"
+                width="15"
+                height="15"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.75"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
                 viewBox="0 0 24 24"
                 aria-hidden="true"
               >
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
+              <span className="project-sidebar__foot-label">{t("projects.sidebarSettings")}</span>
             </button>
             {settingsOpen ? (
               <div
@@ -1166,6 +1168,22 @@ function ProjectSidebarInner({
                 role="dialog"
                 aria-label={t("projects.sidebarSettings")}
               >
+                <label className="project-sidebar__settings-row">
+                  <input
+                    type="checkbox"
+                    checked={showKilled}
+                    onChange={(e) => setShowKilled(e.target.checked)}
+                  />
+                  <span>{t("projects.showKilled")}</span>
+                </label>
+                <label className="project-sidebar__settings-row">
+                  <input
+                    type="checkbox"
+                    checked={showDone}
+                    onChange={(e) => setShowDone(e.target.checked)}
+                  />
+                  <span>{t("projects.showCompleted")}</span>
+                </label>
                 <label className="project-sidebar__settings-row">
                   <input
                     type="checkbox"
@@ -1185,12 +1203,22 @@ function ProjectSidebarInner({
                     <option value="en">{t("language.english")}</option>
                   </select>
                 </label>
+                <div className="project-sidebar__settings-row project-sidebar__settings-row--toggle">
+                  <span>{t("theme.label")}</span>
+                  <ThemeToggle className="project-sidebar__theme-toggle" />
+                </div>
               </div>
             ) : null}
           </div>
-          <ThemeToggle className="project-sidebar__theme-toggle" />
         </div>
       </div>
+      {!collapsed ? (
+        <div
+          className="resize-handle resize-handle--right"
+          onPointerDown={onResizePointerDown}
+          onDoubleClick={onResizeDoubleClick}
+        />
+      ) : null}
       <AddProjectModal open={addProjectOpen} onClose={() => setAddProjectOpen(false)} />
       <ProjectSettingsModal
         open={projectSettingsProjectId !== null}

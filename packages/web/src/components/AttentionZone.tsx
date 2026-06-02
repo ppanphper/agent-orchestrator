@@ -10,11 +10,9 @@ import { useI18n, type TranslationKey } from "@/lib/i18n";
 interface AttentionZoneProps {
   level: AttentionLevel;
   sessions: DashboardSession[];
-  onSend?: (sessionId: string, message: string) => Promise<void> | void;
   onKill?: (sessionId: string) => void;
-  onMerge?: (prNumber: number) => void;
+  onMerge?: (prNumber: number, owner?: string, repo?: string) => void;
   onRestore?: (sessionId: string) => void;
-  onReview?: (sessionId: string) => Promise<void> | void;
   /** Accordion mode: whether this section is collapsed (mobile only) */
   collapsed?: boolean;
   /** Accordion mode: called when the header is tapped to toggle */
@@ -59,11 +57,9 @@ const zoneEmptyKeys: Record<AttentionLevel, TranslationKey> = {
 function AttentionZoneView({
   level,
   sessions,
-  onSend,
   onKill,
   onMerge,
   onRestore,
-  onReview,
   collapsed,
   onToggle,
   compactMobile,
@@ -127,11 +123,9 @@ function AttentionZoneView({
                   <SessionCard
                     key={session.id}
                     session={session}
-                    onSend={onSend}
                     onKill={onKill}
                     onMerge={onMerge}
                     onRestore={onRestore}
-                    onReview={onReview}
                   />
                 ),
               )}
@@ -172,11 +166,9 @@ function AttentionZoneView({
               <SessionCard
                 key={session.id}
                 session={session}
-                onSend={onSend}
                 onKill={onKill}
                 onMerge={onMerge}
                 onRestore={onRestore}
-                onReview={onReview}
               />
             ))}
           </div>
@@ -191,11 +183,9 @@ function areAttentionZonePropsEqual(prev: AttentionZoneProps, next: AttentionZon
     prev.level === next.level &&
     prev.collapsed === next.collapsed &&
     prev.onToggle === next.onToggle &&
-    prev.onSend === next.onSend &&
     prev.onKill === next.onKill &&
     prev.onMerge === next.onMerge &&
     prev.onRestore === next.onRestore &&
-    prev.onReview === next.onReview &&
     prev.compactMobile === next.compactMobile &&
     prev.onPreview === next.onPreview &&
     prev.resetKey === next.resetKey &&
@@ -288,10 +278,11 @@ export function getActionChipLabel(session: DashboardSession): string {
   // Review-class: status
   if (session.status === "ci_failed") return "ci failed";
   if (session.status === "changes_requested") return "changes";
-  // Review-class: PR signals
-  if (session.pr?.ciStatus === "failing") return "ci failed";
-  if (session.pr?.reviewDecision === "changes_requested") return "changes";
-  if (session.pr && !session.pr.mergeability.noConflicts) return "conflicts";
+  // Review-class: PR signals — aggregate across all PRs
+  const prs = session.prs.length > 0 ? session.prs : session.pr ? [session.pr] : [];
+  if (prs.some((p) => p.ciStatus === "failing")) return "ci failed";
+  if (prs.some((p) => p.reviewDecision === "changes_requested")) return "changes";
+  if (prs.some((p) => !p.mergeability.noConflicts)) return "conflicts";
   return "action";
 }
 
@@ -305,7 +296,8 @@ function SessionStateChip({
   const { t } = useI18n();
   let label = t(zoneLabelKeys[level]).toLowerCase();
 
-  if (level === "merge" && session.pr && isPRMergeReady(session.pr)) {
+  const prs = session.prs.length > 0 ? session.prs : session.pr ? [session.pr] : [];
+  if (level === "merge" && prs.length > 0 && prs.every((p) => isPRMergeReady(p))) {
     label = t("zones.chips.ready");
   } else if (level === "action") {
     label = translateActionChipLabel(getActionChipLabel(session), t);
@@ -313,12 +305,13 @@ function SessionStateChip({
     label =
       session.activity === "waiting_input" ? t("zones.chips.waiting") : t("zones.chips.needsInput");
   } else if (level === "review") {
-    label =
-      session.pr?.reviewDecision === "changes_requested"
-        ? t("zones.chips.changes")
-        : t("zones.chips.review");
+    label = prs.some((p) => p.reviewDecision === "changes_requested")
+      ? t("zones.chips.changes")
+      : t("zones.chips.review");
   } else if (level === "pending") {
-    label = session.pr?.unresolvedThreads ? t("zones.chips.threads") : t("zones.chips.pending");
+    label = prs.some((p) => p.unresolvedThreads)
+      ? t("zones.chips.threads")
+      : t("zones.chips.pending");
   } else if (level === "working") {
     label = session.activity === "idle" ? t("zones.chips.idle") : t("zones.chips.active");
   }

@@ -87,7 +87,7 @@ interface BottomSheetProps {
   onConfirm: () => void;
   onCancel: () => void;
   onRequestKill?: () => void;
-  onMerge?: (prNumber: number) => void;
+  onMerge?: (prNumber: number, owner?: string, repo?: string) => void;
   isMergeReady?: boolean;
 }
 
@@ -338,7 +338,7 @@ export function BottomSheet({
                   className="bottom-sheet__btn bottom-sheet__btn--secondary"
                   onClick={() => {
                     if (mergePrNumber !== null) {
-                      onMerge(mergePrNumber);
+                      onMerge(mergePrNumber, session.pr?.owner, session.pr?.repo);
                     }
                   }}
                 >

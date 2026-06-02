@@ -45,8 +45,8 @@ interface DashboardProps {
   dashboardLoadError?: string;
 }
 
-const SIMPLE_KANBAN_LEVELS = ["working", "pending", "action", "merge"] as const;
-const DETAILED_KANBAN_LEVELS = ["working", "pending", "review", "respond", "merge"] as const;
+const SIMPLE_KANBAN_LEVELS = ["working", "action", "pending", "merge"] as const;
+const DETAILED_KANBAN_LEVELS = ["working", "respond", "review", "pending", "merge"] as const;
 const EMPTY_ORCHESTRATORS: DashboardOrchestratorLink[] = [];
 
 function formatRelativeTimeCompact(isoDate: string | null): string {
@@ -357,38 +357,6 @@ function DashboardInner({
     });
   }, [activeOrchestrators, allProjectsView, attentionZones, projects, sessionsByProject]);
 
-  const handleSend = useCallback(
-    async (sessionId: string, message: string) => {
-      try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/send`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          const messageText = text || "Unknown error";
-          console.error(`Failed to send message to ${sessionId}:`, messageText);
-          showToast(t("dashboard.sendFailed", { message: messageText }), "error");
-          const errorWithToast = new Error(messageText);
-          (errorWithToast as Error & { toastShown?: boolean }).toastShown = true;
-          throw errorWithToast;
-        }
-      } catch (error) {
-        const toastShown =
-          error instanceof Error &&
-          "toastShown" in error &&
-          (error as Error & { toastShown?: boolean }).toastShown;
-        if (!toastShown) {
-          console.error(`Network error sending message to ${sessionId}:`, error);
-          showToast(t("dashboard.sendNetworkError"), "error");
-        }
-        throw error;
-      }
-    },
-    [showToast, t],
-  );
-
   const killSession = useCallback(
     async (sessionId: string) => {
       try {
@@ -439,9 +407,13 @@ function DashboardInner({
   }, [previewSession, killSession]);
 
   const handleMerge = useCallback(
-    async (prNumber: number) => {
+    async (prNumber: number, owner?: string, repo?: string) => {
       try {
-        const res = await fetch(`/api/prs/${prNumber}/merge`, { method: "POST" });
+        const params = new URLSearchParams();
+        if (owner) params.set("owner", owner);
+        if (repo) params.set("repo", repo);
+        const qs = params.size > 0 ? `?${params.toString()}` : "";
+        const res = await fetch(`/api/prs/${prNumber}/merge${qs}`, { method: "POST" });
         if (!res.ok) {
           const text = await res.text();
           console.error(`Failed to merge PR #${prNumber}:`, text);
@@ -456,31 +428,6 @@ function DashboardInner({
       }
     },
     [showToast, t],
-  );
-
-  const handleRequestReview = useCallback(
-    async (sessionId: string) => {
-      try {
-        const res = await fetch("/api/reviews", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || "Failed to request review");
-        }
-
-        const session = sessionsRef.current.find((entry) => entry.id === sessionId);
-        showToast(t("dashboard.reviewRequested"), "success");
-        routerRef.current.push(projectReviewPath(session?.projectId ?? projectId));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to request review";
-        console.error(`Failed to request review for ${sessionId}:`, error);
-        showToast(t("dashboard.reviewRequestFailed", { message }), "error");
-      }
-    },
-    [projectId, showToast, t],
   );
 
   const handleRestore = useCallback(
@@ -565,6 +512,8 @@ function DashboardInner({
     [sessions],
   );
   const normalizedProjectName = projectName?.trim().toLowerCase();
+  // Always show the human-readable project name in the titlebar — never the raw
+  // project id hash (that was a poor disambiguation hack and reads as gibberish).
   const headerProjectLabel =
     normalizedProjectName === "agent orchestrator"
       ? (projectId ?? projectName ?? (allProjectsView ? t("app.allProjects") : t("app.dashboard")))
@@ -586,13 +535,13 @@ function DashboardInner({
   const mainPanel = (
     <div className="dashboard-main--desktop">
       <header className="dashboard-app-header">
-        <button
-          type="button"
-          className="dashboard-app-sidebar-toggle"
-          onClick={handleToggleSidebar}
-          aria-label="Toggle sidebar"
-        >
-          {isMobile ? (
+        {isMobile ? (
+          <button
+            type="button"
+            className="dashboard-app-sidebar-toggle"
+            onClick={handleToggleSidebar}
+            aria-label={t("nav.toggleSidebar")}
+          >
             <svg
               width="16"
               height="16"
@@ -604,24 +553,8 @@ function DashboardInner({
             >
               <path d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-          ) : (
-            <svg
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M9 3v18" />
-            </svg>
-          )}
-        </button>
-        <div className="dashboard-app-header__brand dashboard-app-header__brand--hide-mobile">
-          <span>{t("app.name")}</span>
-        </div>
+          </button>
+        ) : null}
         {showHeaderProjectLabel ? (
           <>
             <span className="dashboard-app-header__sep topbar-desktop-only" aria-hidden="true" />
@@ -681,7 +614,7 @@ function DashboardInner({
           {!allProjectsView && orchestratorHref ? (
             <Link
               href={orchestratorHref}
-              className="dashboard-app-btn dashboard-app-btn--amber"
+              className="dashboard-app-btn dashboard-app-btn--primary"
               aria-label={t("dashboard.orchestrator")}
             >
               <svg
@@ -704,7 +637,7 @@ function DashboardInner({
           ) : canSpawnProjectOrchestrator && activeProject ? (
             <button
               type="button"
-              className="dashboard-app-btn dashboard-app-btn--amber"
+              className="dashboard-app-btn dashboard-app-btn--primary"
               aria-label={t("dashboard.spawnOrchestrator")}
               onClick={() => void handleSpawnOrchestrator(activeProject)}
               disabled={isSpawningCurrentProject}
@@ -799,11 +732,9 @@ function DashboardInner({
                     key={level}
                     level={level}
                     sessions={grouped[level]}
-                    onSend={handleSend}
                     onKill={handleKill}
                     onMerge={handleMerge}
                     onRestore={handleRestore}
-                    onReview={handleRequestReview}
                     compactMobile={isMobile}
                     collapsed={isMobile && collapsedZones.has(level)}
                     onToggle={isMobile ? handleZoneToggle : undefined}

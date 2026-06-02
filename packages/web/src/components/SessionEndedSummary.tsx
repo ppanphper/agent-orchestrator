@@ -63,15 +63,27 @@ export function SessionEndedSummary({
     session.lifecycle?.session.lastTransitionAt ??
     session.lastActivityAt;
   const runtimeLabel = session.lifecycle?.runtime.label ?? t("session.unavailable");
-  const prLabel = pr
-    ? pr.state === "merged"
-      ? t("session.merged")
-      : pr.state === "closed"
-        ? t("session.closed")
-        : pr.mergeability.mergeable
-          ? t("session.openMergeReady")
-          : t("session.open")
-    : t("session.noPrShort");
+  const prs = session.prs ?? [];
+  const primaryPR = pr ?? prs[0];
+  const allMerged = prs.length > 0 && prs.every((p) => p.state === "merged");
+  const anyOpen = prs.some((p) => p.state === "open");
+  const prLabel =
+    prs.length > 1
+      ? allMerged
+        ? t("session.merged")
+        : anyOpen
+          ? t("session.open")
+          : t("session.closed")
+      : primaryPR
+        ? primaryPR.state === "merged"
+          ? t("session.merged")
+          : primaryPR.state === "closed"
+            ? t("session.closed")
+            : primaryPR.mergeability.mergeable
+              ? t("session.openMergeReady")
+              : t("session.open")
+        : t("session.noPrShort");
+  const prCount = prs.length;
 
   return (
     <section className="session-ended-summary" aria-label={t("session.terminalEndedSummary")}>
@@ -113,22 +125,34 @@ export function SessionEndedSummary({
               <strong>{runtimeLabel}</strong>
             </div>
             <div className="session-ended-summary__fact">
-              <span>{t("session.pr")}</span>
+              <span>{prCount > 1 ? `${t("nav.prs")} (${prCount})` : t("session.pr")}</span>
               <strong>{prLabel}</strong>
             </div>
           </div>
 
           <div className="session-ended-summary__links">
             {isRestorable ? (
-              <button
-                type="button"
-                onClick={onRestore}
-                className="session-ended-summary__primary"
-              >
-                Restore session
+              <button type="button" onClick={onRestore} className="session-ended-summary__primary">
+                {t("session.restoreSession")}
               </button>
             ) : null}
-            {pr ? (
+            {prs.length > 0 ? (
+              prs.map((p) => (
+                <a
+                  key={p.url}
+                  href={p.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={
+                    isRestorable
+                      ? "session-ended-summary__secondary"
+                      : "session-ended-summary__primary"
+                  }
+                >
+                  {t("session.openPr", { number: p.number })}
+                </a>
+              ))
+            ) : pr ? (
               <a
                 href={pr.url}
                 target="_blank"

@@ -46,8 +46,8 @@ export function EmptyState({
                 cx="12"
                 cy="5.5"
                 r="2.5"
-                fill="rgba(249,115,22,0.18)"
-                stroke="#f97316"
+                fill="color-mix(in srgb, var(--color-accent) 18%, transparent)"
+                stroke="var(--color-accent)"
                 strokeWidth="1.5"
               />
               <circle
@@ -71,7 +71,7 @@ export function EmptyState({
                 y1="8"
                 x2="6.7"
                 y2="14.8"
-                stroke="rgba(249,115,22,0.22)"
+                stroke="color-mix(in srgb, var(--color-accent) 22%, transparent)"
                 strokeWidth="1"
                 strokeDasharray="2.5 2"
               />
@@ -80,7 +80,7 @@ export function EmptyState({
                 y1="8"
                 x2="17.3"
                 y2="14.8"
-                stroke="rgba(249,115,22,0.22)"
+                stroke="color-mix(in srgb, var(--color-accent) 22%, transparent)"
                 strokeWidth="1"
                 strokeDasharray="2.5 2"
               />
