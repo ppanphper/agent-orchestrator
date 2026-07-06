@@ -1,0 +1,25 @@
+name: Prettier
+
+# Check-only: reports formatting issues without modifying the branch.
+# The job fails (and annotates unformatted files) when `prettier --check`
+# finds files that are not formatted, but it never writes, commits, or
+# pushes anything back to the PR. Developers run `npx prettier@3 --write .`
+# locally to fix the reported files.
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - "entire/**"
+      - "worktree-**"
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting with Prettier
+        run: npx --yes prettier@3 --check .
