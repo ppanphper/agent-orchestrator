@@ -10,6 +10,7 @@ import type { ProjectKind } from "../types/workspace";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useI18n } from "../lib/i18n";
 
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 
@@ -86,6 +87,7 @@ export function CreateProjectAgentSheet({
 	path,
 	repositorySetupNeeded = false,
 }: CreateProjectAgentSheetProps) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const agentsQuery = useQuery({
 		...agentsQueryOptions,
@@ -134,7 +136,7 @@ export function CreateProjectAgentSheet({
 					<div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
 						<div className="min-w-0">
 							<Dialog.Title className="text-subtitle font-semibold text-foreground">
-								{kind === "workspace" ? "Workspace agents" : "Project agents"}
+				{t(kind === "workspace" ? "Workspace agents" : "Project agents")}
 							</Dialog.Title>
 							<Dialog.Description className="mt-1 break-all text-xs text-muted-foreground">
 								{path ?? ""}
@@ -144,7 +146,7 @@ export function CreateProjectAgentSheet({
 							<button
 								type="button"
 								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-								aria-label="Close project agents dialog"
+				aria-label={t("Close project agents dialog")}
 								disabled={isBusy}
 							>
 								<X className="size-icon-base" aria-hidden="true" />
@@ -162,8 +164,8 @@ export function CreateProjectAgentSheet({
 						<div className="grid gap-3 sm:grid-cols-2">
 							<RequiredAgentField
 								id="newProjectWorkerAgent"
-								label="Worker agent"
-								placeholder="Select worker agent"
+				label={t("Worker agent")}
+				placeholder={t("Select worker agent")}
 								value={workerAgent}
 								authorized={agentOptions}
 								installed={installedAgents}
@@ -173,8 +175,8 @@ export function CreateProjectAgentSheet({
 							/>
 							<RequiredAgentField
 								id="newProjectOrchestratorAgent"
-								label="Orchestrator agent"
-								placeholder="Select orchestrator agent"
+				label={t("Orchestrator agent")}
+				placeholder={t("Select orchestrator agent")}
 								value={orchestratorAgent}
 								authorized={agentOptions}
 								installed={installedAgents}
@@ -184,17 +186,17 @@ export function CreateProjectAgentSheet({
 							/>
 						</div>
 
-						{isLoadingAgents && <p className="text-xs leading-row text-muted-foreground">Loading agents...</p>}
+						{isLoadingAgents && <p className="text-xs leading-row text-muted-foreground">{t("Loading agents...")}</p>}
 
 						<div className="flex items-center justify-between gap-3 text-xs leading-row text-muted-foreground">
-							<span>Agent availability is cached.</span>
+							<span>{t("Agent availability is cached.")}</span>
 							<button
 								type="button"
 								className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
 								disabled={refreshAgentsMutation.isPending}
 								onClick={() => refreshAgentsMutation.mutate()}
 							>
-								{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
+								{t(refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents")}
 							</button>
 						</div>
 
@@ -258,12 +260,12 @@ export function CreateProjectAgentSheet({
 							</Button>
 							<Button type="submit" variant="primary" disabled={!canSubmit}>
 								{isInitializing
-									? "Setting up..."
+									? t("Setting up...")
 									: isCreating
-										? "Creating..."
+										? t("Creating...")
 										: kind === "workspace"
-											? "Create workspace and start"
-											: "Create and start"}
+											? t("Create workspace and start")
+											: t("Create and start")}
 							</Button>
 						</div>
 					</form>

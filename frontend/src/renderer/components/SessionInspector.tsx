@@ -16,6 +16,7 @@ import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 import { StatusPill } from "./StatusPill";
+import { useI18n } from "../lib/i18n";
 
 type ProjectConfig = components["schemas"]["ProjectConfig"];
 type PRReviewState = components["schemas"]["PRReviewState"];
@@ -131,6 +132,7 @@ export function SessionInspector({
 	view?: InspectorView;
 	onViewChange?: (view: InspectorView) => void;
 }) {
+	const { t } = useI18n();
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const view = viewProp ?? internalView;
 	const setView = (next: InspectorView) => {
@@ -140,16 +142,16 @@ export function SessionInspector({
 
 	if (!session) {
 		return (
-			<aside className={inspectorShellClass} aria-label="Session inspector">
+			<aside className={inspectorShellClass} aria-label={t("Session inspector")}>
 				<div className={inspectorBodyClass}>
-					<p className={inspectorEmptyClass}>Loading session…</p>
+					<p className={inspectorEmptyClass}>{t("Loading session...")}</p>
 				</div>
 			</aside>
 		);
 	}
 
 	return (
-		<aside className={inspectorShellClass} aria-label="Session inspector">
+		<aside className={inspectorShellClass} aria-label={t("Session inspector")}>
 			<div className="flex h-inspector-tabs shrink-0 items-center gap-1 border-b border-border px-3" role="tablist">
 				{VIEWS.map((entry) => (
 					<button
@@ -164,7 +166,7 @@ export function SessionInspector({
 						onClick={() => setView(entry.id)}
 					>
 						<span className="inline-flex shrink-0 [&_svg]:size-icon-md">{entry.icon}</span>
-						<span className="truncate">{entry.label}</span>
+						<span className="truncate">{t(entry.label)}</span>
 					</button>
 				))}
 			</div>
@@ -208,10 +210,11 @@ function Section({
 	className?: string;
 	title: string;
 }) {
+	const { t } = useI18n();
 	return (
 		<section className={cn("mb-6", className)} data-testid="inspector-section">
 			<div className="mb-3 flex items-center justify-between text-2xs font-semibold uppercase tracking-wide-lg text-passive">
-				<span>{title}</span>
+				<span>{t(title)}</span>
 				{action ?? null}
 			</div>
 			{children}
@@ -220,9 +223,10 @@ function Section({
 }
 
 function SummaryView({ session }: { session: WorkspaceSession }) {
+	const { t } = useI18n();
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
-	const prSectionTitle = prSummaries.length > 1 ? `Pull requests (${prSummaries.length})` : "Pull request";
+	const prSectionTitle = prSummaries.length > 1 ? `${t("Pull requests")} (${prSummaries.length})` : t("Pull request");
 	const branchLabel = session.branch || `session/${session.id}`;
 	const issueId = canonicalTrackerIssueId(session.issueId);
 
@@ -230,7 +234,7 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 		<div role="tabpanel">
 			<Section title={prSectionTitle}>
 				{prSummaries.length === 0 ? (
-					<p className={inspectorEmptyClass}>No pull request opened yet.</p>
+					<p className={inspectorEmptyClass}>{t("No pull request opened yet.")}</p>
 				) : (
 					<div className="flex flex-col gap-2">
 						{prSummaries.map((pr) => (
@@ -240,17 +244,17 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 				)}
 			</Section>
 
-			<Section title="Activity">
+			<Section title={t("Activity")}>
 				<ActivityTimeline session={session} />
 			</Section>
 
-			<Section className="border-t border-border pt-5" title="Overview">
+			<Section className="border-t border-border pt-5" title={t("Overview")}>
 				<dl className="flex flex-col gap-1">
-					<Row k="Agent" v={session.provider} mono />
-					{issueId && <Row k="Issue" v={issueId} mono />}
-					<Row k="Branch" v={branchLabel} mono />
-					<Row k="Started" v={formatTimeCompact(session.createdAt ?? session.updatedAt)} mono />
-					<Row k="Session" v={session.id} mono />
+					<Row k={t("Agent")} v={session.provider} mono />
+					{issueId && <Row k={t("Issue")} v={issueId} mono />}
+					<Row k={t("Branch")} v={branchLabel} mono />
+					<Row k={t("Started")} v={formatTimeCompact(session.createdAt ?? session.updatedAt)} mono />
+					<Row k={t("Session")} v={session.id} mono />
 				</dl>
 			</Section>
 		</div>
@@ -258,13 +262,14 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 }
 
 function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
+	const { t } = useI18n();
 	return (
 		<div className="rounded-md border border-border bg-surface px-3 py-2.5">
 			<div className="flex items-center gap-2">
 				<GitPullRequest className="size-icon-md shrink-0 text-passive" aria-hidden="true" />
 				<span className="text-md-sm font-medium text-foreground">PR #{pr.number}</span>
 				<Badge variant="outline" className={cn("h-5 px-1.5 text-micro font-medium", prStateTone[pr.state])}>
-					{pr.state}
+					{t(pr.state)}
 				</Badge>
 				<a
 					href={prBrowserUrl(pr)}
@@ -272,7 +277,7 @@ function PRSummaryCard({ pr }: { pr: SessionPRSummary }) {
 					rel="noopener noreferrer"
 					className="ml-auto inline-flex items-center gap-0.5 text-caption font-medium text-accent hover:underline"
 				>
-					<span>Open</span>
+					<span>{t("Open")}</span>
 					<ArrowUpRight aria-hidden="true" className="size-icon-2xs" strokeWidth={2} />
 				</a>
 			</div>
@@ -640,11 +645,12 @@ function ReviewPanel({
 	onCancel: () => void;
 	onOpenTerminal?: OpenReviewerTerminal;
 }) {
+	const { t } = useI18n();
 	if (sortedPRs(session).length === 0) {
-		return <p className={inspectorEmptyClass}>No pull request opened yet.</p>;
+		return <p className={inspectorEmptyClass}>{t("No pull request opened yet.")}</p>;
 	}
 	if (isLoading) {
-		return <p className={inspectorEmptyClass}>Loading reviews...</p>;
+		return <p className={inspectorEmptyClass}>{t("Loading reviews...")}</p>;
 	}
 
 	const openPRURLs = new Set(
@@ -687,19 +693,19 @@ function ReviewPanel({
 			</div>
 			<div className="flex flex-col gap-3 overflow-hidden rounded-lg border border-border bg-surface p-3 @max-[300px]/inspector:overflow-hidden">
 				<div className="flex min-w-0 items-center justify-between gap-2.5 @max-[300px]/inspector:flex-col @max-[300px]/inspector:items-start">
-					<span className="min-w-0 truncate text-xs font-semibold text-muted-foreground">Pull requests</span>
+					<span className="min-w-0 truncate text-xs font-semibold text-muted-foreground">{t("Pull requests")}</span>
 					<span
 						className={cn(
 							"inline-flex h-control-xs max-w-inspector-status-chip shrink-0 items-center gap-1 overflow-hidden truncate rounded-md px-2 text-2xs font-semibold leading-none @max-[300px]/inspector:max-w-full",
 							reviewerStatusTone[aggregateVerdict.tone],
 						)}
 					>
-						{aggregateVerdict.label}
+						{t(aggregateVerdict.label)}
 					</span>
 				</div>
 				<div className="flex flex-col gap-0 overflow-hidden rounded-md border border-border bg-surface-faint">
 					{openReviewStates.length === 0 ? (
-						<p className={cn(inspectorEmptyClass, "p-3")}>No open pull requests to review.</p>
+						<p className={cn(inspectorEmptyClass, "p-3")}>{t("No open pull requests to review.")}</p>
 					) : null}
 					{openReviewStates.map((reviewState) => (
 						<ReviewStateRow key={`${reviewState.prUrl}:${reviewState.targetSha}`} reviewState={reviewState} />
@@ -718,7 +724,7 @@ function ReviewPanel({
 						type="button"
 					>
 						{reviewRunning ? <X aria-hidden="true" /> : <Play aria-hidden="true" />}
-						{reviewRunning ? (isCancelling ? "Cancelling..." : "Cancel review") : runAction}
+						{t(reviewRunning ? (isCancelling ? "Cancelling..." : "Cancel review") : runAction)}
 					</button>
 					<button
 						className="inline-flex h-control-xl min-w-0 items-center justify-center gap-2 overflow-hidden truncate rounded-md border border-border bg-raised px-2.5 text-xs font-semibold text-muted-foreground transition-[background,border-color,color] duration-fast hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-icon-md [&_svg]:shrink-0"
@@ -727,7 +733,7 @@ function ReviewPanel({
 						type="button"
 					>
 						<Terminal aria-hidden="true" />
-						Open terminal
+						{t("Open terminal")}
 					</button>
 				</div>
 			</div>
@@ -736,6 +742,7 @@ function ReviewPanel({
 }
 
 function ReviewStateRow({ reviewState }: { reviewState: PRReviewState }) {
+	const { t } = useI18n();
 	const verdict = reviewVerdict(reviewState);
 	const title = reviewState.title?.trim() || `PR #${reviewState.prNumber}`;
 	return (
@@ -761,7 +768,7 @@ function ReviewStateRow({ reviewState }: { reviewState: PRReviewState }) {
 				</div>
 			</div>
 			<span className={cn("whitespace-nowrap text-caption font-semibold", reviewerVerdictTone[verdict.tone])}>
-				{verdict.label}
+				{t(verdict.label)}
 			</span>
 		</div>
 	);
@@ -839,6 +846,7 @@ function BrowserView({
 	onTogglePopOut?: (next: boolean) => void;
 	browserView?: BrowserViewModel;
 }) {
+	const { t } = useI18n();
 	// While maximized, the browser is a full-window overlay that covers the rail,
 	// so the inspector's Browser tab has nothing to show (and must not mount a
 	// second BrowserPanelView — it would fight the overlay over the shared native
@@ -847,9 +855,9 @@ function BrowserView({
 		return (
 			<div role="tabpanel">
 				<div className={cn(inspectorEmptyClass, "flex flex-col items-center gap-2 py-10 px-5 text-center")}>
-					<p className="text-md-sm text-muted-foreground">Browser preview is in the center pane.</p>
+					<p className="text-md-sm text-muted-foreground">{t("Browser preview is in the center pane.")}</p>
 					<Button onClick={() => onTogglePopOut?.(false)} size="sm" type="button" variant="outline">
-						Return to panel
+						{t("Return to panel")}
 					</Button>
 				</div>
 			</div>

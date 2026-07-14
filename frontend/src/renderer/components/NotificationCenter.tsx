@@ -20,6 +20,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { useI18n } from "../lib/i18n";
 
 type NotificationCenterProps = {
 	style?: React.CSSProperties;
@@ -69,6 +70,7 @@ export function NotificationRuntime() {
 }
 
 export function NotificationCenter({ style }: NotificationCenterProps) {
+	const { t } = useI18n();
 	const notificationsQuery = useNotificationsQuery();
 	const markRead = useMarkNotificationReadMutation();
 	const markAllRead = useMarkAllNotificationsReadMutation();
@@ -105,7 +107,7 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<TopbarButton
-					aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+					aria-label={unreadCount > 0 ? t("{count} unread notifications", { count: unreadCount }) : t("Notifications")}
 					className="relative"
 					style={style}
 					variant="icon"
@@ -120,23 +122,23 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-notification-width p-0" sideOffset={8}>
 				<div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-					<DropdownMenuLabel className="px-0 py-0">Notifications</DropdownMenuLabel>
+					<DropdownMenuLabel className="px-0 py-0">{t("Notifications")}</DropdownMenuLabel>
 					<button
-						aria-label="Mark all notifications read"
+						aria-label={t("Mark all notifications read")}
 						className="inline-flex h-control-md items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
 						disabled={unreadCount === 0 || markAllRead.isPending}
 						onClick={() => void markAll()}
 						type="button"
 					>
 						<CheckCheck className="size-icon-md" aria-hidden="true" />
-						Mark all
+						{t("Mark all")}
 					</button>
 				</div>
 				{actionError ? <div className="border-b border-border px-3 py-2 text-xs text-error">{actionError}</div> : null}
 				{notificationsQuery.isError && unreadCount === 0 ? (
-					<div className="px-3 py-8 text-center text-control text-muted-foreground">Could not load notifications.</div>
+					<div className="px-3 py-8 text-center text-control text-muted-foreground">{t("Could not load notifications.")}</div>
 				) : unreadCount === 0 ? (
-					<div className="px-3 py-8 text-center text-control text-muted-foreground">No unread notifications.</div>
+					<div className="px-3 py-8 text-center text-control text-muted-foreground">{t("No unread notifications.")}</div>
 				) : (
 					<div className="max-h-notification-max-height overflow-y-auto p-1">
 						{notifications.map((notification, index) => (
@@ -168,6 +170,7 @@ function NotificationItem({
 	onMarkRead: (id: string) => Promise<void>;
 	onOpen: (notification: NotificationDTO) => void;
 }) {
+	const { t } = useI18n();
 	const Icon = notificationIcon(notification.type);
 	return (
 		<div className="grid grid-cols-notification gap-2 rounded-md px-2 py-2.5">
@@ -193,20 +196,20 @@ function NotificationItem({
 			</div>
 			<div className="flex items-start gap-1">
 				<button
-					aria-label="Open notification target"
+					aria-label={t("Open notification target")}
 					className="grid size-control-md place-items-center rounded-md text-muted-foreground hover:bg-surface hover:text-foreground"
 					onClick={() => onOpen(notification)}
-					title="Open target"
+					title={t("Open target")}
 					type="button"
 				>
 					<ExternalLink className="size-icon-md" aria-hidden="true" />
 				</button>
 				<button
-					aria-label="Mark notification read"
+					aria-label={t("Mark notification read")}
 					className="grid size-control-md place-items-center rounded-md text-muted-foreground hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
 					disabled={disabled}
 					onClick={() => void onMarkRead(notification.id)}
-					title="Mark read"
+					title={t("Mark read")}
 					type="button"
 				>
 					<Check className="size-icon-md" aria-hidden="true" />

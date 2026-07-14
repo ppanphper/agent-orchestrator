@@ -7,6 +7,7 @@ import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import type { MigrationState, MigrationStatus } from "../../main/app-state";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { useI18n } from "../lib/i18n";
 
 export const migrationSettingsQueryKey = ["migration-settings"] as const;
 
@@ -61,6 +62,7 @@ function formatTime(iso?: string): string {
 // idempotent POST /api/v1/import (safe even when completed/declined/failed).
 // Issue #2205.
 export function MigrationSection() {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: migrationSettingsQueryKey,
@@ -99,47 +101,46 @@ export function MigrationSection() {
 	const report = migration.report;
 	const completed = migration.status === "completed";
 	const buttonLabel = run.isPending
-		? "Running…"
+		? t("Running...")
 		: completed
-			? "Re-run migration"
+			? t("Re-run migration")
 			: migration.status === "failed"
-				? "Retry migration"
-				: "Run migration";
+				? t("Retry migration")
+				: t("Run migration");
 
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="text-control">Migration</CardTitle>
+				<CardTitle className="text-control">{t("Migration")}</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<p className="text-xs leading-row text-muted-foreground">
-					Import projects and orchestrator sessions from an earlier Agent Orchestrator install. Your old files are never
-					modified, and this is safe to run more than once.
+					{t("Import projects and orchestrator sessions from an earlier Agent Orchestrator install. Your old files are never modified, and this is safe to run more than once.")}
 				</p>
 
 				<div className="flex flex-col gap-2 text-xs">
-					<Row label="Status">
-						<span className={statusClass(migration.status)}>{STATUS_LABEL[migration.status]}</span>
+					<Row label={t("Status")}>
+						<span className={statusClass(migration.status)}>{t(STATUS_LABEL[migration.status])}</span>
 					</Row>
 					{formatTime(migration.completedAt || migration.lastAttemptAt) && (
-						<Row label={completed ? "Completed" : "Last attempt"}>
+						<Row label={t(completed ? "Completed" : "Last attempt")}>
 							<span className="text-foreground">{formatTime(migration.completedAt || migration.lastAttemptAt)}</span>
 						</Row>
 					)}
 					{report && (
-						<Row label="Last report">
+						<Row label={t("Last report")}>
 							<span className="text-foreground">
 								{report.projectsImported} imported, {report.projectsSkipped} already present
 							</span>
 						</Row>
 					)}
-					<Row label="Legacy install">
+					<Row label={t("Legacy install")}>
 						{query.isLoading ? (
-							<span className="text-passive">Checking…</span>
+							<span className="text-passive">{t("Checking...")}</span>
 						) : available ? (
 							<span className="font-mono text-caption text-foreground">{legacyRoot || "found"}</span>
 						) : (
-							<span className="text-passive">None found</span>
+							<span className="text-passive">{t("None found")}</span>
 						)}
 					</Row>
 				</div>
@@ -151,10 +152,10 @@ export function MigrationSection() {
 				)}
 				{run.isError && (
 					<p className="text-xs leading-row text-error">
-						{run.error instanceof Error ? run.error.message : "Migration failed."}
+						{run.error instanceof Error ? run.error.message : t("Migration failed.")}
 					</p>
 				)}
-				{run.isSuccess && !run.isPending && <p className="text-xs leading-row text-success">Migration complete.</p>}
+				{run.isSuccess && !run.isPending && <p className="text-xs leading-row text-success">{t("Migration complete.")}</p>}
 
 				<div className="flex items-center gap-3">
 					<Button
@@ -167,7 +168,7 @@ export function MigrationSection() {
 						{buttonLabel}
 					</Button>
 					{!available && !query.isLoading && (
-						<span className="text-xs text-passive">Nothing to import from a legacy install.</span>
+						<span className="text-xs text-passive">{t("Nothing to import from a legacy install.")}</span>
 					)}
 				</div>
 			</CardContent>

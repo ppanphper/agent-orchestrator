@@ -7,6 +7,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useI18n } from "../lib/i18n";
 
 export const updateSettingsQueryKey = ["update-settings"] as const;
 
@@ -20,6 +21,7 @@ const CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
 // (the same file auto-updater.ts consumes), letting a user pick Stable vs Nightly.
 // Changes apply on the next launch / update check.
 export function UpdatesSection() {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: updateSettingsQueryKey,
@@ -59,19 +61,19 @@ export function UpdatesSection() {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="text-control">Updates</CardTitle>
+				<CardTitle className="text-control">{t("Updates")}</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4">
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="updatesEnabled" className="text-xs text-muted-foreground">
-						Automatic updates
+						{t("Automatic updates")}
 					</Label>
 					<EnabledSelect id="updatesEnabled" value={form.enabled} onChange={setEnabled} />
 				</div>
 
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="updateChannel" className="text-xs text-muted-foreground">
-						Update channel
+						{t("Update channel")}
 					</Label>
 					<Select value={form.channel} onValueChange={(v) => setChannel(v as UpdateChannel)} disabled={!form.enabled}>
 						<SelectTrigger id="updateChannel" className="h-control-form w-full text-control">
@@ -80,7 +82,7 @@ export function UpdatesSection() {
 						<SelectContent>
 							{CHANNEL_OPTIONS.map((opt) => (
 								<SelectItem key={opt.value} value={opt.value}>
-									{opt.label}
+									{t(opt.label)}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -96,14 +98,14 @@ export function UpdatesSection() {
 
 				<div className="flex items-center gap-3">
 					<Button type="button" variant="primary" onClick={() => save.mutate(form)} disabled={save.isPending}>
-						{save.isPending ? "Saving…" : "Save changes"}
+						{t(save.isPending ? "Saving..." : "Save changes")}
 					</Button>
 					{save.isError && (
 						<span className="text-xs text-error">
-							{save.error instanceof Error ? save.error.message : "Save failed"}
+							{save.error instanceof Error ? save.error.message : t("Save failed")}
 						</span>
 					)}
-					{savedAt && !save.isPending && !save.isError && <span className="text-xs text-success">Saved.</span>}
+					{savedAt && !save.isPending && !save.isError && <span className="text-xs text-success">{t("Saved.")}</span>}
 				</div>
 
 				<UpdateActions />
@@ -116,6 +118,7 @@ export function UpdatesSection() {
 // an Update button that downloads then installs. It works even when automatic
 // updates are off, so users who never opted in can still pull the latest build.
 function UpdateActions() {
+	const { t } = useI18n();
 	const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
 	const version = useQuery({ queryKey: ["app-version"], queryFn: () => aoBridge.app.getVersion() });
 
@@ -138,13 +141,13 @@ function UpdateActions() {
 	return (
 		<div className="flex flex-col gap-3 border-t border-border pt-4">
 			<div className="flex items-center gap-2 text-xs">
-				<span className="text-passive">Current version</span>
+				<span className="text-passive">{t("Current version")}</span>
 				<span className="font-mono text-caption text-foreground">{version.data ? `v${version.data}` : "…"}</span>
 			</div>
 			<div className="flex items-center gap-3">
 				<Button type="button" variant="outline" onClick={() => void aoBridge.updates.check()} disabled={busy}>
 					{checking && <Loader2 className="mr-2 size-icon-base animate-spin" />}
-					Check for updates
+					{t("Check for updates")}
 				</Button>
 
 				{status.state === "available" && (
@@ -154,7 +157,7 @@ function UpdateActions() {
 				)}
 				{status.state === "downloaded" && (
 					<Button type="button" variant="primary" onClick={() => void aoBridge.updates.install()}>
-						Restart &amp; install
+						{t("Restart & install")}
 					</Button>
 				)}
 
@@ -165,9 +168,10 @@ function UpdateActions() {
 }
 
 function UpdateStatusLine({ status }: { status: UpdateStatus }) {
+	const { t } = useI18n();
 	switch (status.state) {
 		case "checking":
-			return <span className="text-xs text-muted-foreground">Checking for updates…</span>;
+			return <span className="text-xs text-muted-foreground">{t("Checking for updates...")}</span>;
 		case "available":
 			return (
 				<span className="text-xs text-muted-foreground">
@@ -175,11 +179,11 @@ function UpdateStatusLine({ status }: { status: UpdateStatus }) {
 				</span>
 			);
 		case "downloading":
-			return <span className="text-xs text-muted-foreground">Downloading… {status.percent ?? 0}%</span>;
+			return <span className="text-xs text-muted-foreground">{t("Downloading... {percent}%", { percent: status.percent ?? 0 })}</span>;
 		case "downloaded":
-			return <span className="text-xs text-success">Downloaded. Restart to finish updating.</span>;
+			return <span className="text-xs text-success">{t("Downloaded. Restart to finish updating.")}</span>;
 		case "not-available":
-			return <span className="text-xs text-muted-foreground">You're on the latest version.</span>;
+			return <span className="text-xs text-muted-foreground">{t("You're on the latest version.")}</span>;
 		case "unsupported":
 			return <span className="text-xs text-passive">{status.message ?? "Updates need the installed app."}</span>;
 		case "error":
@@ -190,14 +194,15 @@ function UpdateStatusLine({ status }: { status: UpdateStatus }) {
 }
 
 function EnabledSelect({ id, value, onChange }: { id: string; value: boolean; onChange: (value: boolean) => void }) {
+	const { t } = useI18n();
 	return (
 		<Select value={value ? "on" : "off"} onValueChange={(v) => onChange(v === "on")}>
 			<SelectTrigger id={id} className="h-control-form w-full text-control">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="on">Enabled</SelectItem>
-				<SelectItem value="off">Disabled</SelectItem>
+				<SelectItem value="on">{t("Enabled")}</SelectItem>
+				<SelectItem value="off">{t("Disabled")}</SelectItem>
 			</SelectContent>
 		</Select>
 	);

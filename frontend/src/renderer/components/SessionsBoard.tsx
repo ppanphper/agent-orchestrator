@@ -24,6 +24,7 @@ import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { prBrowserUrl, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
+import { useI18n } from "../lib/i18n";
 
 const isLinux =
 	typeof navigator !== "undefined" &&
@@ -83,6 +84,7 @@ const COLUMNS: Column[] = [
 ];
 
 export function SessionsBoard({ projectId }: SessionsBoardProps) {
+	const { t } = useI18n();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
@@ -203,28 +205,28 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				</TopbarKillError>
 			)}
 			<TopbarButton
-				aria-label="New task"
+				aria-label={t("New task")}
 				disabled={isProjectRestarting}
 				onClick={() => setIsNewTaskOpen(true)}
 				variant="accent"
 			>
 				<Plus className="size-icon-md" aria-hidden="true" />
-				New task
+				{t("New task")}
 			</TopbarButton>
 			<TopbarButton
-				aria-label={orchestrator ? "Orchestrator" : "Spawn Orchestrator"}
+				aria-label={t(orchestrator ? "Orchestrator" : "Spawn Orchestrator")}
 				disabled={isSpawning || isProjectRestarting}
 				onClick={() => void openOrchestrator()}
 				variant="primary"
 			>
 				<OrchestratorIcon className="size-icon-md" aria-hidden="true" />
 				{isProjectRestarting
-					? "Restarting..."
+					? t("Restarting...")
 					: isSpawning
-						? "Spawning..."
+						? t("Spawning...")
 						: orchestrator
-							? "Orchestrator"
-							: "Spawn Orchestrator"}
+							? t("Orchestrator")
+							: t("Spawn Orchestrator")}
 			</TopbarButton>
 		</>
 	) : isLinux ? (
@@ -238,8 +240,8 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 			    (review feedback on #2432). */}
 			{!showWelcome && (
 				<DashboardSubhead
-					title="Board"
-					subtitle="Live agent sessions flowing from work → review → merge."
+					title={t("Board")}
+					subtitle={t("Live agent sessions flowing from work -> review -> merge.")}
 					actions={actions}
 				/>
 			)}
@@ -252,13 +254,13 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 						{health.state === "restart_needed" || health.state === "duplicates" ? (
 							<TopbarButton disabled={isProjectRestarting} onClick={() => void restartOrchestrator()} variant="primary">
 								<RotateCw className="size-3.5" aria-hidden="true" />
-								Restart
+								{t("Restart")}
 							</TopbarButton>
 						) : null}
 					</div>
 				) : null}
 				{workspaceQuery.isError ? (
-					<p className="py-10 text-center text-xs text-passive">Could not load sessions.</p>
+					<p className="py-10 text-center text-xs text-passive">{t("Could not load sessions.")}</p>
 				) : showWelcome ? (
 					<BoardWelcome />
 				) : showProjectEmpty ? (
@@ -304,7 +306,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 						>
 							<path d="m9 18 6-6-6-6" />
 						</svg>
-						<span className="font-mono text-2xs font-medium uppercase tracking-wide-sm">Done / Terminated</span>
+						<span className="font-mono text-2xs font-medium uppercase tracking-wide-sm">{t("Done / Terminated")}</span>
 						<span className="ml-auto shrink-0 font-mono text-micro text-passive">{done.length}</span>
 					</button>
 					{doneExpanded && (
@@ -342,6 +344,7 @@ function ZoneColumn({
 	sessions: WorkspaceSession[];
 	onOpen: (s: WorkspaceSession) => void;
 }) {
+	const { t } = useI18n();
 	return (
 		<section
 			className="flex min-w-0 flex-col overflow-hidden rounded-panel"
@@ -357,7 +360,7 @@ function ZoneColumn({
 						boxShadow: col.dotGlow ? `0 0 7px color-mix(in srgb, ${col.dot} 60%, transparent)` : undefined,
 					}}
 				/>
-				<span className={cn("text-caption font-semibold uppercase tracking-wide-md", col.titleClass)}>{col.label}</span>
+				<span className={cn("text-caption font-semibold uppercase tracking-wide-md", col.titleClass)}>{t(col.label)}</span>
 				<span className="ml-auto font-mono text-caption leading-none text-passive">{sessions.length}</span>
 			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto px-2.75 pb-3">
@@ -372,6 +375,7 @@ function ZoneColumn({
 }
 
 function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
+	const { t } = useI18n();
 	const badge = sessionBadge(session);
 	const issueId = canonicalTrackerIssueId(session.issueId);
 	const branch = session.branch || "";
@@ -389,7 +393,7 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 				<div className="flex items-center gap-2 px-3.25 pb-2.25 pt-3">
 					<span className={cn("inline-flex items-center gap-1.5 text-caption font-medium", badge.className)}>
 						<span className={cn("size-dot-sm rounded-full bg-current")} />
-						{badge.label}
+						{t(badge.label)}
 					</span>
 					{issueId && (
 						<span
@@ -419,7 +423,7 @@ function SessionCard({ session, onOpen }: { session: WorkspaceSession; onOpen: (
 				onClick={(event) => event.stopPropagation()}
 			>
 				{prSummaries.length === 0 ? (
-					"no PR yet"
+					t("no PR yet")
 				) : (
 					<div className="flex flex-col gap-1">
 						{groupPRsByLifecycle(prSummaries).map((group) => (
@@ -436,6 +440,7 @@ type BoardPRLifecycleStatus = { label: "closed" | "open" | "draft" | "merged"; c
 type BoardPRGroup = { status: BoardPRLifecycleStatus; prs: SessionPRSummary[] };
 
 function BoardPRGroup({ group }: { group: BoardPRGroup }) {
+	const { t } = useI18n();
 	return (
 		<span
 			aria-label={`${group.prs.map((pr) => `#${pr.number}`).join(", ")} ${group.status.label}`}
@@ -455,7 +460,7 @@ function BoardPRGroup({ group }: { group: BoardPRGroup }) {
 					{index < group.prs.length - 1 ? "," : null}
 				</span>
 			))}
-			<span className={cn("font-medium", group.status.className)}>{group.status.label}</span>
+			<span className={cn("font-medium", group.status.className)}>{t(group.status.label)}</span>
 		</span>
 	);
 }

@@ -14,6 +14,7 @@ import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useI18n } from "../lib/i18n";
 
 type Project = components["schemas"]["Project"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
@@ -31,6 +32,7 @@ const REVIEWER_OPTIONS = ["claude-code", "codex", "opencode"] as const;
 const projectQueryKey = (id: string) => ["project", id] as const;
 
 export function ProjectSettingsForm({ projectId }: { projectId: string }) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 
 	const query = useQuery({
@@ -46,17 +48,17 @@ export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 	});
 
 	if (query.isLoading) {
-		return <CenteredNote>Loading project settings…</CenteredNote>;
+		return <CenteredNote>{t("Loading project settings...")}</CenteredNote>;
 	}
 	if (query.isError || !query.data) {
 		return (
-			<CenteredNote>{query.error instanceof Error ? query.error.message : "Could not load project."}</CenteredNote>
+			<CenteredNote>{query.error instanceof Error ? query.error.message : t("Could not load project.")}</CenteredNote>
 		);
 	}
 
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<DashboardSubhead title="Settings" subtitle={query.data.path} />
+			<DashboardSubhead title={t("Settings")} subtitle={query.data.path} />
 			<div className="min-h-0 flex-1 overflow-y-auto p-4.5">
 				<SettingsBody
 					key={projectId}
@@ -70,6 +72,7 @@ export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 }
 
 function SettingsBody({ project, projectId, onSaved }: { project: Project; projectId: string; onSaved: () => void }) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const config = project.config ?? {};
@@ -191,7 +194,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 		>
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-control">Identity</CardTitle>
+					<CardTitle className="text-control">{t("Identity")}</CardTitle>
 				</CardHeader>
 				<CardContent className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
 					<ReadonlyRow label="id" value={project.id} />
@@ -204,7 +207,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 			{project.kind === "workspace" && (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-[13px]">Workspace repos</CardTitle>
+						<CardTitle className="text-[13px]">{t("Workspace repos")}</CardTitle>
 					</CardHeader>
 					<CardContent className="flex flex-col gap-2">
 						{project.workspaceRepos?.length ? (
@@ -221,7 +224,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 								</div>
 							))
 						) : (
-							<p className="text-[12px] text-muted-foreground">No child repositories are registered.</p>
+							<p className="text-[12px] text-muted-foreground">{t("No child repositories are registered.")}</p>
 						)}
 					</CardContent>
 				</Card>
@@ -229,10 +232,10 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-control">Worktrees</CardTitle>
+						<CardTitle className="text-control">{t("Worktrees")}</CardTitle>
 				</CardHeader>
 				<CardContent className="flex flex-col gap-4">
-					<Field label="Default branch" htmlFor="defaultBranch">
+						<Field label={t("Default branch")} htmlFor="defaultBranch">
 						<input
 							id="defaultBranch"
 							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
@@ -241,7 +244,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							placeholder="main"
 						/>
 					</Field>
-					<Field label="Session prefix" htmlFor="sessionPrefix">
+						<Field label={t("Session prefix")} htmlFor="sessionPrefix">
 						<input
 							id="sessionPrefix"
 							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
@@ -255,14 +258,14 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-control">Agents</CardTitle>
+						<CardTitle className="text-control">{t("Agents")}</CardTitle>
 				</CardHeader>
 				<CardContent className="flex flex-col gap-4">
 					<RequiredAgentField
 						id="workerAgent"
 						value={form.workerAgent}
-						placeholder="Select worker agent"
-						label="Default worker agent"
+							placeholder={t("Select worker agent")}
+							label={t("Default worker agent")}
 						authorized={agentCatalog?.authorized}
 						installed={agentCatalog?.installed}
 						supported={agentCatalog?.supported}
@@ -273,8 +276,8 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 					<RequiredAgentField
 						id="orchestratorAgent"
 						value={form.orchestratorAgent}
-						placeholder="Select orchestrator agent"
-						label="Default orchestrator agent"
+							placeholder={t("Select orchestrator agent")}
+							label={t("Default orchestrator agent")}
 						authorized={agentCatalog?.authorized}
 						installed={agentCatalog?.installed}
 						supported={agentCatalog?.supported}
@@ -283,14 +286,14 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 						onChange={(v) => setForm((f) => ({ ...f, orchestratorAgent: v }))}
 					/>
 					<div className="flex items-center justify-between gap-3 text-xs leading-row text-muted-foreground">
-						<span>Agent availability is cached.</span>
+							<span>{t("Agent availability is cached.")}</span>
 						<button
 							type="button"
 							className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
 							disabled={refreshAgentsMutation.isPending}
 							onClick={() => refreshAgentsMutation.mutate()}
 						>
-							{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
+								{t(refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents")}
 						</button>
 					</div>
 					{refreshAgentsMutation.isError && (
@@ -301,9 +304,9 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 						</p>
 					)}
 					{missingRequiredAgent && (
-						<p className="text-xs leading-row text-error">Worker and orchestrator agents are required.</p>
+							<p className="text-xs leading-row text-error">{t("Worker and orchestrator agents are required.")}</p>
 					)}
-					<Field label="Model override" htmlFor="model">
+						<Field label={t("Model override")} htmlFor="model">
 						<input
 							id="model"
 							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
@@ -312,7 +315,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 							placeholder="(agent default)"
 						/>
 					</Field>
-					<Field label="Permission mode" htmlFor="permissionMode">
+						<Field label={t("Permission mode")} htmlFor="permissionMode">
 						<PermissionModeSelect
 							id="permissionMode"
 							value={form.permissions}
@@ -324,10 +327,10 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-control">Reviewers</CardTitle>
+						<CardTitle className="text-control">{t("Reviewers")}</CardTitle>
 				</CardHeader>
 				<CardContent className="flex flex-col gap-4">
-					<Field label="Default reviewer agent" htmlFor="reviewerHarness">
+						<Field label={t("Default reviewer agent")} htmlFor="reviewerHarness">
 						<ReviewerSelect
 							id="reviewerHarness"
 							value={form.reviewerHarness}
@@ -339,7 +342,7 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-control">Tracker intake</CardTitle>
+						<CardTitle className="text-control">{t("Tracker intake")}</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<IntakeFields form={intakeForm} onChange={patchIntake} repoPreview={{ value: effectiveIntakeRepo }} />
@@ -348,15 +351,15 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 			<div className="flex items-center gap-3">
 				<Button type="submit" variant="primary" disabled={mutation.isPending}>
-					{mutation.isPending ? "Saving…" : "Save changes"}
+						{t(mutation.isPending ? "Saving..." : "Save changes")}
 				</Button>
 				{validationError && <span className="text-xs text-error">{validationError}</span>}
 				{mutation.isError && (
 					<span className="text-xs text-error">
-						{mutation.error instanceof Error ? mutation.error.message : "Save failed"}
+							{mutation.error instanceof Error ? mutation.error.message : t("Save failed")}
 					</span>
 				)}
-				{savedAt && !mutation.isPending && !mutation.isError && <span className="text-xs text-success">Saved.</span>}
+					{savedAt && !mutation.isPending && !mutation.isError && <span className="text-xs text-success">{t("Saved.")}</span>}
 				{replacementError && !mutation.isPending && !mutation.isError && (
 					<span className="text-xs text-warning">Orchestrator restart failed: {replacementError}</span>
 				)}
@@ -374,16 +377,17 @@ function PermissionModeSelect({
 	value: string;
 	onChange: (value: string) => void;
 }) {
+	const { t } = useI18n();
 	return (
 		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
 			<SelectTrigger id={id} className="h-control-form w-full text-control">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="__default__">Project default</SelectItem>
+					<SelectItem value="__default__">{t("Project default")}</SelectItem>
 				{PERMISSION_MODE_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
-						{opt.label}
+							{t(opt.label)}
 					</SelectItem>
 				))}
 			</SelectContent>
@@ -392,13 +396,14 @@ function PermissionModeSelect({
 }
 
 function ReviewerSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+	const { t } = useI18n();
 	return (
 		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
 			<SelectTrigger id={id} className="h-control-form w-full text-control">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="__default__">Project default</SelectItem>
+					<SelectItem value="__default__">{t("Project default")}</SelectItem>
 				{REVIEWER_OPTIONS.map((reviewer) => (
 					<SelectItem key={reviewer} value={reviewer}>
 						{reviewer}

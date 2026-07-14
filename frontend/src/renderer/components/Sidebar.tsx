@@ -65,6 +65,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { CreateProjectFlow, type CreateProjectInput } from "./CreateProjectFlow";
 import { ReportProblemDialog } from "./ReportProblemDialog";
 import { ResizeHandle } from "./ResizeHandle";
+import { useI18n } from "../lib/i18n";
 
 // The macOS hiddenInset traffic lights and the fixed TitlebarNav overlay live
 // in the full-width topbar's left inset (_shell renders the bar above the
@@ -150,6 +151,7 @@ export function Sidebar({
 	onInitializeProject,
 	onRemoveProject,
 }: SidebarProps) {
+	const { t } = useI18n();
 	const selection = useSelection();
 	const eventsConnection = useEventsConnection();
 	const { state, setOpen } = useSidebar();
@@ -233,7 +235,7 @@ export function Sidebar({
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<button
-								aria-label="Orchestrator board"
+								aria-label={t("Orchestrator board")}
 								className={cn(
 									"grid h-5.5 w-5.5 shrink-0 place-items-center",
 									"group-data-[collapsible=icon]:size-control-board group-data-[collapsible=icon]:rounded-lg",
@@ -248,18 +250,18 @@ export function Sidebar({
 							</button>
 						</TooltipTrigger>
 						<TooltipContent side="right" hidden={state !== "collapsed"}>
-							Orchestrator board
+							{t("Orchestrator board")}
 						</TooltipContent>
 					</Tooltip>
 					{!isMac && (
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<SidebarTrigger
-									aria-label="Expand sidebar"
+									aria-label={t("Expand sidebar")}
 									className="hidden size-9 shrink-0 rounded-lg text-passive hover:bg-interactive-hover hover:text-foreground group-data-[collapsible=icon]:grid [&_svg]:size-4"
 								/>
 							</TooltipTrigger>
-							<TooltipContent side="right">Expand sidebar · ⌘B</TooltipContent>
+							<TooltipContent side="right">{t("Expand sidebar")} · ⌘B</TooltipContent>
 						</Tooltip>
 					)}
 					<span className="sidebar-expanded-chrome min-w-0 flex-1 truncate text-sm font-bold tracking-tight-lg text-foreground group-data-[collapsible=icon]:hidden">
@@ -275,11 +277,11 @@ export function Sidebar({
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<SidebarTrigger
-									aria-label="Collapse sidebar"
+									aria-label={t("Collapse sidebar")}
 									className="sidebar-expanded-chrome size-icon-xl shrink-0 rounded-sm p-0 text-passive hover:bg-interactive-hover hover:text-foreground group-data-[collapsible=icon]:hidden [&_svg]:size-icon-lg"
 								/>
 							</TooltipTrigger>
-							<TooltipContent>Collapse sidebar · ⌘B</TooltipContent>
+							<TooltipContent>{t("Collapse sidebar")} · ⌘B</TooltipContent>
 						</Tooltip>
 					)}
 				</div>
@@ -290,7 +292,7 @@ export function Sidebar({
 					{/* Section label (project-sidebar__nav-label) */}
 					<div className="sidebar-expanded-chrome flex shrink-0 items-center justify-between px-2 pb-2 group-data-[collapsible=icon]:hidden">
 						<SidebarGroupLabel className="h-auto rounded-none p-0 text-2xs font-semibold uppercase tracking-wide-lg text-passive">
-							Projects
+							{t("Projects")}
 						</SidebarGroupLabel>
 						<CreateProjectButton onCreateProject={onCreateProject} onInitializeProject={onInitializeProject} />
 					</div>
@@ -299,14 +301,14 @@ export function Sidebar({
 					<SidebarGroupContent>
 						{workspaceError ? (
 							<div className="sidebar-expanded-chrome px-2 py-3 group-data-[collapsible=icon]:hidden">
-								<p className="text-xs text-foreground">Could not load projects.</p>
+									<p className="text-xs text-foreground">{t("Could not load projects.")}</p>
 								<p className="mt-1 text-caption text-passive">{workspaceError}</p>
 							</div>
 						) : workspaces.length === 0 ? (
 							<div className="sidebar-expanded-chrome px-2 py-3 group-data-[collapsible=icon]:hidden">
-								<p className="text-xs text-passive">No projects yet.</p>
+									<p className="text-xs text-passive">{t("No projects yet.")}</p>
 								<p className="mt-1 text-caption text-passive">
-									Click <span className="text-foreground">+</span> above to register a repo or workspace.
+										{t("Click + above to register a repo or workspace.")}
 								</p>
 							</div>
 						) : (
@@ -338,23 +340,23 @@ export function Sidebar({
 			<SidebarFooter className="relative mt-auto min-h-[95px] gap-0 overflow-hidden border-t border-border p-1.75 transition-[padding] duration-200 ease-linear group-data-[collapsible=icon]:min-h-[88px] group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-1.5">
 				<div className="sidebar-expanded-chrome relative flex min-h-[81px] w-full min-w-[186px] flex-col gap-1 transition-[opacity,transform] duration-150 ease-out group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:-translate-x-2 group-data-[collapsible=icon]:opacity-0">
 					<button
-						aria-label="Feedback"
+							aria-label={t("Feedback")}
 						className="flex w-full items-center justify-start gap-2.5 rounded-md p-2 text-control font-medium text-passive transition-colors hover:bg-interactive-hover hover:text-foreground [&_svg]:size-icon-lg [&_svg]:text-passive"
 						onClick={() => setIsFeedbackOpen(true)}
 						type="button"
 					>
 						<MessageSquare aria-hidden="true" />
-						<span className="tracking-tight">Feedback</span>
+							<span className="tracking-tight">{t("Feedback")}</span>
 					</button>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<button
-								aria-label="Settings"
+									aria-label={t("Settings")}
 								className="flex flex-1 items-center justify-start gap-2.5 rounded-md p-2 text-control font-medium text-passive transition-colors hover:bg-interactive-hover hover:text-foreground data-[state=open]:bg-interactive-hover data-[state=open]:text-foreground [&_svg]:size-icon-lg [&_svg]:text-passive"
 								type="button"
 							>
 								<Settings aria-hidden="true" />
-								<span className="tracking-tight">Settings</span>
+									<span className="tracking-tight">{t("Settings")}</span>
 							</button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent
@@ -364,33 +366,33 @@ export function Sidebar({
 						>
 							<DropdownMenuItem onSelect={toggleTheme}>
 								{theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-								{theme === "dark" ? "Light mode" : "Dark mode"}
+									{t(theme === "dark" ? "Light mode" : "Dark mode")}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={selection.goPrs}>
 								<GitPullRequest aria-hidden="true" />
-								Pull requests
+									{t("Pull requests")}
 							</DropdownMenuItem>
 							<DropdownMenuItem disabled>
 								<Search aria-hidden="true" />
-								Search
+									{t("Search")}
 								<DropdownMenuShortcut>⌘K</DropdownMenuShortcut>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => setTimeout(() => setMobileOpen(true), 0)}>
 								<Smartphone aria-hidden="true" />
-								Connect Mobile
+									{t("Connect Mobile")}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							{selection.activeProjectId && (
 								<DropdownMenuItem onSelect={() => selection.goSettings(selection.activeProjectId!)}>
 									<Settings aria-hidden="true" />
-									Project settings
+										{t("Project settings")}
 								</DropdownMenuItem>
 							)}
 							<DropdownMenuItem onSelect={selection.goGlobalSettings}>
 								<Settings aria-hidden="true" />
-								Global settings
+									{t("Global settings")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -405,7 +407,7 @@ export function Sidebar({
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<button
-								aria-label="Feedback"
+									aria-label={t("Feedback")}
 								className="grid size-9 place-items-center rounded-lg text-passive transition-colors hover:bg-interactive-hover hover:text-foreground [&_svg]:size-4"
 								onClick={() => setIsFeedbackOpen(true)}
 								type="button"
@@ -413,14 +415,14 @@ export function Sidebar({
 								<MessageSquare aria-hidden="true" />
 							</button>
 						</TooltipTrigger>
-						<TooltipContent side="right">Feedback</TooltipContent>
+							<TooltipContent side="right">{t("Feedback")}</TooltipContent>
 					</Tooltip>
 					<DropdownMenu>
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<DropdownMenuTrigger asChild>
 									<button
-										aria-label="Settings"
+											aria-label={t("Settings")}
 										className="grid size-control-board place-items-center rounded-lg text-passive transition-colors hover:bg-interactive-hover hover:text-foreground [&_svg]:size-icon-base"
 										type="button"
 									>
@@ -428,38 +430,38 @@ export function Sidebar({
 									</button>
 								</DropdownMenuTrigger>
 							</TooltipTrigger>
-							<TooltipContent side="right">Settings</TooltipContent>
+								<TooltipContent side="right">{t("Settings")}</TooltipContent>
 						</Tooltip>
 						<DropdownMenuContent align="start" className="min-w-0" side="top">
 							<DropdownMenuItem onSelect={toggleTheme}>
 								{theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-								{theme === "dark" ? "Light mode" : "Dark mode"}
+									{t(theme === "dark" ? "Light mode" : "Dark mode")}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={selection.goPrs}>
 								<GitPullRequest aria-hidden="true" />
-								Pull requests
+									{t("Pull requests")}
 							</DropdownMenuItem>
 							<DropdownMenuItem disabled>
 								<Search aria-hidden="true" />
-								Search
+									{t("Search")}
 								<DropdownMenuShortcut>⌘K</DropdownMenuShortcut>
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => setTimeout(() => setMobileOpen(true), 0)}>
 								<Smartphone aria-hidden="true" />
-								Connect Mobile
+									{t("Connect Mobile")}
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
 							{selection.activeProjectId && (
 								<DropdownMenuItem onSelect={() => selection.goSettings(selection.activeProjectId!)}>
 									<Settings aria-hidden="true" />
-									Project settings
+										{t("Project settings")}
 								</DropdownMenuItem>
 							)}
 							<DropdownMenuItem onSelect={selection.goGlobalSettings}>
 								<Settings aria-hidden="true" />
-								Global settings
+									{t("Global settings")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -468,7 +470,7 @@ export function Sidebar({
 							<TooltipTrigger asChild>
 								<SidebarTrigger className="size-control-board rounded-lg text-passive hover:bg-interactive-hover hover:text-foreground [&_svg]:size-icon-base" />
 							</TooltipTrigger>
-							<TooltipContent side="right">Expand sidebar · ⌘B</TooltipContent>
+								<TooltipContent side="right">{t("Expand sidebar")} · ⌘B</TooltipContent>
 						</Tooltip>
 					)}
 				</div>
@@ -482,7 +484,7 @@ export function Sidebar({
 				style={noDragStyle}
 			/>
 			<SidebarRail
-				aria-label="Expand sidebar"
+					aria-label={t("Expand sidebar")}
 				className="group-data-[state=expanded]:hidden hover:after:bg-transparent"
 				onClick={() => setOpen(true)}
 				onPointerDown={onCollapsedResizePointerDown}
@@ -509,6 +511,7 @@ function ProjectItem({
 	onToggle: () => void;
 	onRemoveProject: (projectId: string) => Promise<void>;
 }) {
+	const { t } = useI18n();
 	const projectActive = selection.activeProjectId === workspace.id && !selection.activeSessionId;
 	const queryClient = useQueryClient();
 	const [removeError, setRemoveError] = useState<string | null>(null);
@@ -632,7 +635,7 @@ function ProjectItem({
 							<LayoutDashboard aria-hidden="true" />
 						</button>
 					</TooltipTrigger>
-					<TooltipContent>Dashboard</TooltipContent>
+						<TooltipContent>{t("Board")}</TooltipContent>
 				</Tooltip>
 				<Tooltip>
 					<TooltipTrigger asChild>
@@ -652,8 +655,8 @@ function ProjectItem({
 							: isSpawning
 								? "Spawning…"
 								: orchestrator
-									? "Orchestrator"
-									: "Spawn orchestrator"}
+										? t("Orchestrator")
+										: t("Spawn Orchestrator")}
 					</TooltipContent>
 				</Tooltip>
 				<DropdownMenu>
@@ -665,7 +668,7 @@ function ProjectItem({
 					<DropdownMenuContent side="right" align="start" className="min-w-44">
 						<DropdownMenuItem onSelect={() => selection.goSettings(workspace.id)}>
 							<Settings aria-hidden="true" />
-							Project settings
+								{t("Project settings")}
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
@@ -674,7 +677,7 @@ function ProjectItem({
 							onSelect={() => void removeProject()}
 						>
 							<Trash2 aria-hidden="true" />
-							Remove project
+								{t("Remove project")}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
@@ -698,19 +701,18 @@ function ProjectItem({
 				onOpenChange={(open) => {
 					if (!isRemoving) setConfirmOpen(open);
 				}}
-				title={`Remove project`}
+					title={t("Remove project")}
 				description={
 					<>
 						<p className="text-sm font-medium text-foreground">
-							This will remove <strong>{workspace.name}</strong> from AO
+								{t("This will remove {project} from AO", { project: workspace.name })}
 						</p>
 						<p className="mt-1 text-xs text-muted-foreground">
-							This stops its live sessions and removes it from the sidebar, but keeps the repository folder and stored
-							history on disk.
+								{t("This stops its live sessions and removes it from the sidebar, but keeps the repository folder and stored history on disk.")}
 						</p>
 					</>
 				}
-				confirmLabel={isRemoving ? "Removing…" : "Remove"}
+					confirmLabel={isRemoving ? t("Removing...") : t("Remove")}
 				destructive
 				busy={isRemoving}
 				error={removeError}
@@ -826,13 +828,14 @@ function CreateProjectButton({
 	onCreateProject,
 	onInitializeProject,
 }: Pick<SidebarProps, "onCreateProject" | "onInitializeProject">) {
+	const { t } = useI18n();
 	return (
 		<CreateProjectFlow mode="choose" onCreateProject={onCreateProject} onInitializeProject={onInitializeProject}>
 			{({ disabled, choosePath, label }) => (
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<button
-							aria-label="New project"
+							aria-label={t("New project")}
 							className="grid size-icon-xl place-items-center rounded-sm text-passive transition-colors hover:bg-interactive-hover hover:text-muted-foreground"
 							disabled={disabled}
 							onClick={choosePath}
@@ -852,6 +855,7 @@ function CreateProjectListItem({
 	onCreateProject,
 	onInitializeProject,
 }: Pick<SidebarProps, "onCreateProject" | "onInitializeProject">) {
+	const { t } = useI18n();
 	return (
 		<CreateProjectFlow mode="choose" onCreateProject={onCreateProject} onInitializeProject={onInitializeProject}>
 			{({ disabled, choosePath, label }) => (
@@ -859,7 +863,7 @@ function CreateProjectListItem({
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<button
-								aria-label="New project"
+								aria-label={t("New project")}
 								className="grid h-control-board w-full place-items-center rounded-sm text-passive transition-colors hover:bg-interactive-hover hover:text-muted-foreground"
 								disabled={disabled}
 								onClick={choosePath}
