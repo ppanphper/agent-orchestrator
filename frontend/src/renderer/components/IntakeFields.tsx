@@ -2,6 +2,7 @@ import { Info } from "lucide-react";
 import type { components } from "../../api/schema";
 import { Label } from "./ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { useI18n } from "../lib/i18n";
 
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 
@@ -90,12 +91,13 @@ export function IntakeFields({
 	// info-icon tooltip — used by the create-project sheet, which stays minimal.
 	compact?: boolean;
 }) {
+	const { t } = useI18n();
 	const needsRule = intakeNeedsRule(form);
 	return (
 		<div className="flex flex-col gap-4">
 			{!compact && (
 				<p className="text-xs leading-row text-muted-foreground">
-					Auto-spawn worker sessions from matching tracker issues.
+					{t("Auto-spawn worker sessions from matching tracker issues.")}
 				</p>
 			)}
 			<div className="flex items-center gap-2">
@@ -106,7 +108,7 @@ export function IntakeFields({
 						checked={form.enabled}
 						onChange={(e) => onChange({ enabled: e.target.checked })}
 					/>
-					Enable issue intake
+					{t("Enable issue intake")}
 				</label>
 				{compact && (
 					<TooltipProvider delayDuration={0}>
@@ -115,12 +117,12 @@ export function IntakeFields({
 								<button
 									type="button"
 									className="grid size-icon-base place-items-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none"
-									aria-label="What does enabling issue intake do?"
+									aria-label={t("What does enabling issue intake do?")}
 								>
 									<Info className="size-3.5" aria-hidden="true" />
 								</button>
 							</TooltipTrigger>
-							<TooltipContent>Auto-spawns a worker session for each matching GitHub issue.</TooltipContent>
+							<TooltipContent>{t("Auto-spawns a worker session for each matching GitHub issue.")}</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
 				)}
@@ -128,7 +130,7 @@ export function IntakeFields({
 			{form.enabled && (
 				<>
 					{repoPreview && (
-						<IntakeField label="Repository">
+						<IntakeField label={t("Repository")}>
 							{repoPreview.value ? (
 								<a
 									href={`https://github.com/${repoPreview.value}`}
@@ -145,17 +147,17 @@ export function IntakeFields({
 							)}
 						</IntakeField>
 					)}
-					<IntakeField label="Assignee" htmlFor="intakeAssignee">
+					<IntakeField label={t("Assignee")} htmlFor="intakeAssignee">
 						<input
 							id="intakeAssignee"
 							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
 							value={form.assignee}
 							onChange={(e) => onChange({ assignee: e.target.value })}
-							placeholder="type username or * for any"
+							placeholder={t("type username or * for any")}
 						/>
 					</IntakeField>
 					{!compact && needsRule && (
-						<p className="text-xs leading-row text-error">Enabling intake requires an assignee.</p>
+						<p className="text-xs leading-row text-error">{t("Enabling intake requires an assignee.")}</p>
 					)}
 				</>
 			)}

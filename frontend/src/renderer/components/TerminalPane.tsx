@@ -9,6 +9,7 @@ import { isLoopbackHostname } from "../lib/loopback";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { XtermTerminal } from "./XtermTerminal";
 import { RestoreUnavailableDialog } from "./RestoreUnavailableDialog";
+import { useI18n } from "../lib/i18n";
 
 type TerminalPaneProps = {
 	session?: WorkspaceSession;
@@ -137,6 +138,7 @@ function bannerText(state: TerminalSessionState, error?: string): string | undef
 }
 
 function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSize }: TerminalPaneProps) {
+	const { t } = useI18n();
 	const attachSession =
 		session && terminalTarget?.kind === "reviewer"
 			? { ...session, terminalHandleId: terminalTarget.handleId }
@@ -242,12 +244,12 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 	const banner = bannerText(state, error);
 	const showEmptyState = !handleId;
 	const showExitedState = state === "exited";
-	const emptyStateTitle = session ? "Starting session" : "Agent Orchestrator";
+		const emptyStateTitle = session ? t("Starting session") : "Agent Orchestrator";
 	const emptyStateMessage = session
 		? session.kind === "orchestrator"
-			? "Preparing the orchestrator terminal. This can take a moment while AO creates the worktree and starts the agent."
-			: "Preparing the worker terminal. This can take a moment while AO creates the worktree and starts the agent."
-		: "No session selected. Pick a worker to attach its terminal.";
+				? t("Preparing the orchestrator terminal. This can take a moment while AO creates the worktree and starts the agent.")
+				: t("Preparing the worker terminal. This can take a moment while AO creates the worktree and starts the agent.")
+			: t("No session selected. Pick a worker to attach its terminal.");
 
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-terminal">
@@ -262,7 +264,7 @@ function AttachedTerminal({ session, theme, daemonReady, terminalTarget, fontSiz
 			)}
 			<div className="relative min-h-0 flex-1">
 				<XtermTerminal
-					ariaLabel="Session terminal"
+						ariaLabel={t("Session terminal")}
 					fontSize={fontSize}
 					onError={handleInitError}
 					onLinkOpen={handleLinkOpen}
@@ -307,18 +309,19 @@ type TerminalEndedStripProps = {
 };
 
 function TerminalEndedStrip({ canRestore, error, isRestoring, onRestore, variant }: TerminalEndedStripProps) {
+	const { t } = useI18n();
 	const message = canRestore
-		? "Restore the session to attach a live terminal and continue writing."
+		? t("Restore the session to attach a live terminal and continue writing.")
 		: variant === "reviewer"
-			? "This reviewer terminal has ended. Re-run review from the summary panel, or switch back to the agent terminal."
-			: "This terminal process ended, but the session is not marked terminated yet.";
+			? t("This reviewer terminal has ended. Re-run review from the summary panel, or switch back to the agent terminal.")
+			: t("This terminal process ended, but the session is not marked terminated yet.");
 
 	return (
 		<div className="shrink-0 border-b border-border bg-surface/80 px-4 py-2">
 			<div className="flex min-h-control-board items-center gap-3">
 				<div className="min-w-0 flex-1">
 					<div className="font-mono text-caption font-medium uppercase tracking-wide-md text-muted-foreground">
-						Terminal ended
+							{t("Terminal ended")}
 					</div>
 					<div className="mt-0.5 truncate text-xs text-muted-foreground">{message}</div>
 				</div>
@@ -330,7 +333,7 @@ function TerminalEndedStrip({ canRestore, error, isRestoring, onRestore, variant
 						disabled={isRestoring}
 						onClick={onRestore}
 					>
-						{isRestoring ? "Restoring..." : "Restore session"}
+							{t(isRestoring ? "Restoring..." : "Restore session")}
 					</button>
 				)}
 			</div>

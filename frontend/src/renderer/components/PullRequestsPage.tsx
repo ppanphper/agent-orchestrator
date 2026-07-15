@@ -16,6 +16,7 @@ import { Button } from "./ui/button";
 import { PRSummaryParts } from "./PRSummaryDisplay";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { cn } from "../lib/utils";
+import { useI18n } from "../lib/i18n";
 
 type PRState = SessionPRSummary["state"];
 
@@ -37,6 +38,7 @@ type PRRow = {
 // /prs/{number}/merge and /resolve-comments. Per-PR CI/review facts also live on
 // the session route's inspector.
 export function PullRequestsPage() {
+	const { t } = useI18n();
 	const navigate = useNavigate();
 	const workspaceQuery = useWorkspaceQuery();
 	const sessions = (workspaceQuery.data ?? []).flatMap((w) => w.sessions);
@@ -52,22 +54,22 @@ export function PullRequestsPage() {
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
 			<DashboardSubhead
-				title="Pull requests"
-				subtitle="Open PRs across every agent session, ready to resolve and merge."
+				title={t("Pull requests")}
+				subtitle={t("Open PRs across every agent session, ready to resolve and merge.")}
 				count={rows.length}
 			/>
 
 			<div className="min-h-0 flex-1 overflow-y-auto p-4.5">
 				{rows.length === 0 ? (
-					<p className="py-10 text-center text-xs text-passive">No open pull requests.</p>
+					<p className="py-10 text-center text-xs text-passive">{t("No open pull requests.")}</p>
 				) : (
 					<Table>
 						<TableHeader>
 							<TableRow>
 								<TableHead className="w-pr-col-number">PR</TableHead>
-								<TableHead>Worker</TableHead>
-								<TableHead className="w-pr-col-state">State</TableHead>
-								<TableHead className="w-pr-table-actions text-right">Actions</TableHead>
+								<TableHead>{t("Worker")}</TableHead>
+								<TableHead className="w-pr-col-state">{t("State")}</TableHead>
+								<TableHead className="w-pr-table-actions text-right">{t("Actions")}</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
@@ -92,6 +94,7 @@ export function PullRequestsPage() {
 }
 
 function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 	const refresh = () => {
@@ -122,10 +125,10 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 			if (error) throw new Error(apiErrorMessage(error));
 		},
 		onSuccess: () => {
-			setNote({ ok: true, text: "comments resolved" });
+			setNote({ ok: true, text: t("comments resolved") });
 			refresh();
 		},
-		onError: (e) => setNote({ ok: false, text: e instanceof Error ? e.message : "resolve failed" }),
+		onError: (e) => setNote({ ok: false, text: e instanceof Error ? e.message : t("resolve failed") }),
 	});
 
 	const actionable = row.pr.state === "open" || row.pr.state === "draft";
@@ -149,7 +152,7 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 			</TableCell>
 			<TableCell>
 				<Badge variant="outline" className={cn("h-5 px-1.5 text-micro font-medium", stateTone[row.pr.state])}>
-					{row.pr.state}
+					{t(row.pr.state)}
 				</Badge>
 			</TableCell>
 			<TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -164,7 +167,7 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 							disabled={resolve.isPending}
 							onClick={() => resolve.mutate()}
 						>
-							{resolve.isPending ? "…" : "Resolve"}
+							{resolve.isPending ? "…" : t("Resolve")}
 						</Button>
 						<Button
 							size="sm"
@@ -173,7 +176,7 @@ function PRRowView({ row, onOpen }: { row: PRRow; onOpen: () => void }) {
 							disabled={merge.isPending}
 							onClick={() => merge.mutate()}
 						>
-							{merge.isPending ? "Merging…" : "Merge"}
+							{merge.isPending ? t("Merging...") : t("Merge")}
 						</Button>
 					</div>
 				) : (

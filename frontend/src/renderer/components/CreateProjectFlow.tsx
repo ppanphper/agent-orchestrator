@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import type { ProjectKind } from "../types/workspace";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { Button } from "./ui/button";
+import { useI18n } from "../lib/i18n";
 
 export type CreateProjectInput = { path: string; asWorkspace?: boolean } & CreateProjectAgentSelection;
 
@@ -28,6 +29,7 @@ export function CreateProjectFlow({
 	onCreateProject: (input: CreateProjectInput) => Promise<void>;
 	onInitializeProject: (path: string) => Promise<void>;
 }) {
+	const { t } = useI18n();
 	const [error, setError] = useState<string | null>(null);
 	const [modePickerOpen, setModePickerOpen] = useState(false);
 	const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -56,7 +58,7 @@ export function CreateProjectFlow({
 		setIsChoosingPath(true);
 		try {
 			const path = await aoBridge.app.chooseDirectory(
-				kind === "workspace" ? "Choose a workspace folder" : "Choose a project repository",
+				t(kind === "workspace" ? "Choose a workspace folder" : "Choose a project repository"),
 			);
 			if (path && kind === "single_repo") {
 				const setupCode = await repositorySetupRequired(path);
@@ -68,7 +70,7 @@ export function CreateProjectFlow({
 				setFolderPickerOpen(false);
 			}
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Could not add project");
+			setError(err instanceof Error ? err.message : t("Could not add project"));
 		} finally {
 			setIsChoosingPath(false);
 		}
@@ -100,7 +102,7 @@ export function CreateProjectFlow({
 			setSelectedPath(null);
 		} catch (err) {
 			const code = err instanceof Error && "code" in err ? (err.code as string | undefined) : undefined;
-			const message = err instanceof Error ? err.message : "Could not add project";
+			const message = err instanceof Error ? err.message : t("Could not add project");
 			if (selectedKind === "single_repo" && isRepositorySetupRecoveryCode(code)) setRepositorySetup(code);
 			setError(message);
 			if (hasModePicker) {
@@ -127,14 +129,14 @@ export function CreateProjectFlow({
 	};
 
 	const label = isChoosingPath
-		? "Opening..."
+		? t("Opening...")
 		: isInitializing
 			? hasModePicker
-				? "Initializing..."
-				: "Setting up..."
+				? t("Initializing...")
+				: t("Setting up...")
 			: isCreating
-				? "Creating..."
-				: idleLabel;
+				? t("Creating...")
+				: t(idleLabel);
 
 	return (
 		<>
@@ -236,6 +238,7 @@ function CreateProjectModeDialog({
 	onSelect: (kind: ProjectKind) => void;
 	open: boolean;
 }) {
+	const { t } = useI18n();
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
@@ -244,17 +247,17 @@ function CreateProjectModeDialog({
 					<div className="flex shrink-0 items-start justify-between gap-4 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-5">
 						<div className="min-w-0">
 							<Dialog.Title className="text-[18px] font-semibold text-foreground">
-								Import to Agent Orchestrator
+								{t("Import to Agent Orchestrator")}
 							</Dialog.Title>
 							<Dialog.Description className="mt-1 text-[13px] font-medium text-muted-foreground">
-								What are you importing?
+								{t("What are you importing?")}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
 							<button
 								type="button"
 								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-								aria-label="Close new project dialog"
+								aria-label={t("Close new project dialog")}
 								disabled={disabled}
 							>
 								<X className="size-4" aria-hidden="true" />
@@ -263,13 +266,13 @@ function CreateProjectModeDialog({
 					</div>
 					<div className="grid min-h-0 gap-3 overflow-y-auto px-4 pb-4 sm:grid-cols-2 sm:px-6 sm:pb-6">
 						<ProjectModeButton
-							description="Several Git repos that live under one parent folder."
+							description={t("Several Git repos that live under one parent folder.")}
 							disabled={disabled}
 							kind="workspace"
 							onClick={() => onSelect("workspace")}
 						/>
 						<ProjectModeButton
-							description="A single Git repository — one codebase, tracked in one repo."
+							description={t("A single Git repository - one codebase, tracked in one repo.")}
 							disabled={disabled}
 							kind="single_repo"
 							onClick={() => onSelect("single_repo")}
@@ -292,11 +295,12 @@ function ProjectModeButton({
 	kind: ProjectKind;
 	onClick: () => void;
 }) {
+	const { t } = useI18n();
 	const isWorkspace = kind === "workspace";
 	return (
 		<button
 			type="button"
-			aria-label={isWorkspace ? "Workspace" : "Project"}
+			aria-label={t(isWorkspace ? "Workspace" : "Project")}
 			className="flex min-h-[176px] w-full flex-col justify-end rounded-lg border border-border bg-card px-4 py-4 text-left transition-colors hover:bg-background focus-visible:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 sm:min-h-[220px] sm:px-5 sm:py-5"
 			disabled={disabled}
 			onClick={onClick}
@@ -327,14 +331,14 @@ function ProjectModeButton({
 				)}
 			</span>
 			<span className="block text-[15px] font-semibold text-foreground sm:text-[16px]">
-				{isWorkspace ? "Workspace" : "Project"}
+				{t(isWorkspace ? "Workspace" : "Project")}
 			</span>
 			<span className="mt-2 block text-[12px] leading-5 text-muted-foreground sm:min-h-[40px] sm:text-[13px]">
 				{description}
 			</span>
 			<span className="mt-3 font-mono text-[12px] font-semibold text-passive">
 				<span className="mr-2 text-passive">•</span>
-				{isWorkspace ? "Multiple repositories" : "One repository"}
+				{t(isWorkspace ? "Multiple repositories" : "One repository")}
 			</span>
 		</button>
 	);
@@ -359,6 +363,7 @@ function CreateProjectFolderDialog({
 	open: boolean;
 	scan: ImportFolderScan | null;
 }) {
+	const { t } = useI18n();
 	const isWorkspace = kind === "workspace";
 	const failedRepos = scan?.repos.filter((repo) => repo.status === "error" || !repo.hasRemote) ?? [];
 	const hasScan = scan !== null;
@@ -371,7 +376,7 @@ function CreateProjectFolderDialog({
 						<button
 							type="button"
 							className="grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-							aria-label="Back to import type"
+							aria-label={t("Back to import type")}
 							disabled={disabled}
 							onClick={onBack}
 						>
@@ -379,19 +384,19 @@ function CreateProjectFolderDialog({
 						</button>
 						<div className="min-w-0 flex-1">
 							<Dialog.Title className="text-[18px] font-semibold text-foreground">
-								{isWorkspace ? "Import workspace" : "Import project"}
+								{t(isWorkspace ? "Import workspace" : "Import project")}
 							</Dialog.Title>
 							<Dialog.Description className="mt-1 max-w-[520px] text-[13px] font-medium leading-5 text-muted-foreground">
 								{isWorkspace
-									? "Pick a folder that contains your Git repositories. Each repo inside it joins the workspace."
-									: "Import a single Git repository as one project."}
+									? t("Pick a folder that contains your Git repositories. Each repo inside it joins the workspace.")
+									: t("Import a single Git repository as one project.")}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
 							<button
 								type="button"
 								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-								aria-label="Close import dialog"
+								aria-label={t("Close import dialog")}
 								disabled={disabled}
 							>
 								<X className="size-4" aria-hidden="true" />
@@ -408,11 +413,11 @@ function CreateProjectFolderDialog({
 											{displayImportPath(scan.path)}
 										</div>
 										<div className="mt-0.5 text-[12px] text-muted-foreground">
-											{isWorkspace ? "Workspace root" : "Project folder"}
+											{t(isWorkspace ? "Workspace root" : "Project folder")}
 										</div>
 									</div>
 									<Button type="button" variant="outline" disabled={disabled} onClick={onChooseFolder}>
-										Change
+										{t("Change")}
 									</Button>
 								</div>
 
@@ -458,7 +463,7 @@ function CreateProjectFolderDialog({
 									<FolderPlus className="size-5" aria-hidden="true" />
 								</span>
 								<span className="text-[15px] font-semibold text-foreground">
-									{isWorkspace ? "Choose a folder" : "Choose a project folder"}
+									{t(isWorkspace ? "Choose a folder" : "Choose a project folder")}
 								</span>
 								<span className="mt-2 max-w-full text-pretty text-[12px] text-muted-foreground sm:text-[13px]">
 									{isWorkspace
@@ -482,15 +487,15 @@ function CreateProjectFolderDialog({
 							{hasScan && failedRepos.length > 0
 								? `Resolve ${failedRepos.length} failed ${failedRepos.length === 1 ? "repository" : "repositories"} to continue`
 								: isWorkspace
-									? "No repositories to import"
-									: "No project selected"}
+									? t("No repositories to import")
+									: t("No project selected")}
 						</p>
 						<div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
 							<Button type="button" variant="outline" disabled={disabled} onClick={() => onOpenChange(false)}>
 								Cancel
 							</Button>
 							<Button type="button" variant="primary" disabled>
-								{isWorkspace ? "Import workspace" : "Import project"}
+								{t(isWorkspace ? "Import workspace" : "Import project")}
 							</Button>
 						</div>
 					</div>

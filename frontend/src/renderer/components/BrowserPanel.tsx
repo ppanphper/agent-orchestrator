@@ -7,6 +7,7 @@ import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { cn } from "../lib/utils";
+import { useI18n } from "../lib/i18n";
 
 type BrowserPanelProps = {
 	session: WorkspaceSession;
@@ -186,6 +187,7 @@ export function BrowserPanelView({
 	browserView,
 	annotationQueue,
 }: BrowserPanelProps & { annotationQueue: BrowserAnnotationQueueModel; browserView: BrowserViewModel }) {
+	const { t } = useI18n();
 	const {
 		viewId,
 		navState,
@@ -254,15 +256,15 @@ export function BrowserPanelView({
 
 	const annotationStatusLabel =
 		status === "picking"
-			? "Pick element"
+			? t("Pick element")
 			: status === "queued"
 				? queuedCount > 1
-					? `Queued (${queuedCount})`
-					: "Queued"
+					? t("Queued ({count})", { count: queuedCount })
+					: t("Queued")
 				: status === "sending"
-					? "Sending"
+					? t("Sending")
 					: status === "sent"
-						? "Sent"
+						? t("Sent")
 						: status === "error"
 							? error
 							: "";
@@ -277,7 +279,7 @@ export function BrowserPanelView({
 				onSubmit={submit}
 			>
 				<Button
-					aria-label="Back"
+					aria-label={t("Back")}
 					disabled={!navState.canGoBack}
 					onClick={() => void goBack()}
 					size="icon-sm"
@@ -287,7 +289,7 @@ export function BrowserPanelView({
 					<ArrowLeft aria-hidden="true" className="size-icon-base" />
 				</Button>
 				<Button
-					aria-label="Forward"
+					aria-label={t("Forward")}
 					disabled={!navState.canGoForward}
 					onClick={() => void goForward()}
 					size="icon-sm"
@@ -297,7 +299,7 @@ export function BrowserPanelView({
 					<ArrowRight aria-hidden="true" className="size-icon-base" />
 				</Button>
 				<Button
-					aria-label={navState.isLoading ? "Stop" : "Reload"}
+					aria-label={t(navState.isLoading ? "Stop" : "Reload")}
 					onClick={() => void (navState.isLoading ? stop() : reload())}
 					size="icon-sm"
 					type="button"
@@ -312,17 +314,17 @@ export function BrowserPanelView({
 				<Button
 					aria-label={
 						canRetryAnnotation
-							? "Retry annotation"
+							? t("Retry annotation")
 							: annotationMode || status === "picking"
-								? "Cancel annotation"
-								: "Annotate page"
+								? t("Cancel annotation")
+								: t("Annotate page")
 					}
 					aria-pressed={annotationMode || status === "picking"}
 					className="browser-panel__annotate-btn"
 					disabled={!canAnnotate || status === "sending"}
 					onClick={() => void toggleAnnotationMode()}
 					size="icon-sm"
-					title={canRetryAnnotation ? "Retry annotation" : "Annotate page"}
+					title={t(canRetryAnnotation ? "Retry annotation" : "Annotate page")}
 					type="button"
 					variant="ghost"
 				>
@@ -339,7 +341,7 @@ export function BrowserPanelView({
 						{annotationStatusLabel}
 					</span>
 				) : sessionBusy ? (
-					<span className="browser-panel__annotation-status">Agent working</span>
+					<span className="browser-panel__annotation-status">{t("Agent working")}</span>
 				) : null}
 				<div className="relative min-w-0 flex-1">
 					<Globe2
@@ -347,7 +349,7 @@ export function BrowserPanelView({
 						className="pointer-events-none absolute left-2.25 top-1/2 size-icon-md -translate-y-1/2 text-passive"
 					/>
 					<Input
-						aria-label="Browser URL"
+						aria-label={t("Browser URL")}
 						className="h-browser-url pl-browser-url font-mono text-xs"
 						onChange={(event) => setUrlInput(event.target.value)}
 						placeholder="localhost:5173"
@@ -355,7 +357,7 @@ export function BrowserPanelView({
 					/>
 				</div>
 				<Button
-					aria-label={poppedOut ? "Return to panel" : "Pop out"}
+					aria-label={t(poppedOut ? "Return to panel" : "Pop out")}
 					onClick={() => onTogglePopOut(!poppedOut)}
 					size="icon-sm"
 					type="button"
@@ -378,7 +380,7 @@ export function BrowserPanelView({
 				{showStaticPreview ? <StaticPreview url={navState.url} /> : null}
 				{navState.url === "" ? (
 					<div className="pointer-events-none absolute inset-0 grid place-items-center p-5 text-center font-mono text-xs text-passive">
-						<p>Enter a URL or click one in the terminal.</p>
+						<p>{t("Enter a URL or click one in the terminal.")}</p>
 					</div>
 				) : null}
 				{navState.error ? (

@@ -26,6 +26,7 @@ import {
 	topbarHeaderMacClass,
 	topbarProjectLabelClass,
 } from "./TopbarButton";
+import { useI18n } from "../lib/i18n";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
 const isLinux =
@@ -60,6 +61,7 @@ const TOPBAR_ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: 
 // project is in scope. Merges the old DashboardTopbar/Topbar pair —
 // agent-orchestrator keeps those as two components aligned only by CSS.
 export function ShellTopbar() {
+	const { t } = useI18n();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const params = useParams({ strict: false }) as { projectId?: string; sessionId?: string };
@@ -158,7 +160,7 @@ export function ShellTopbar() {
 							</span>
 							<span className="inline-flex h-control-sm items-center gap-1 rounded-md border border-border bg-surface px-2 text-micro font-semibold leading-none tracking-wide-sm text-muted-foreground">
 								<OrchestratorIcon className="size-3 shrink-0" aria-hidden="true" />
-								Orchestrator
+									{t("Orchestrator")}
 							</span>
 						</div>
 					</div>
@@ -186,18 +188,18 @@ export function ShellTopbar() {
 						{isOrchestrator ? (
 							<>
 								<TopbarButton
-									aria-label="New task"
+										aria-label={t("New task")}
 									disabled={isProjectRestarting}
 									onClick={openNewTask}
 									style={noDragStyle}
 									variant="primary"
 								>
 									<Plus className="size-icon-md" aria-hidden="true" />
-									New task
+										{t("New task")}
 								</TopbarButton>
-								<TopbarButton aria-label="Open Kanban" onClick={openBoard} style={noDragStyle} variant="accent">
+									<TopbarButton aria-label={t("Open Kanban")} onClick={openBoard} style={noDragStyle} variant="accent">
 									<LayoutDashboard className="size-icon-md" aria-hidden="true" />
-									Kanban
+										{t("Kanban")}
 								</TopbarButton>
 							</>
 						) : null}
@@ -221,20 +223,20 @@ export function ShellTopbar() {
 						) : null}
 						{!isOrchestrator && (
 							<TopbarButton
-								aria-label="Open orchestrator"
+									aria-label={t("Open orchestrator")}
 								disabled={isSpawning || isProjectRestarting}
 								onClick={() => void openOrchestrator()}
 								style={noDragStyle}
 								variant="primary"
 							>
 								<OrchestratorIcon className="size-icon-md" aria-hidden="true" />
-								{isProjectRestarting ? "Restarting…" : isSpawning ? "Spawning…" : "Orchestrator"}
+									{t(isProjectRestarting ? "Restarting..." : isSpawning ? "Spawning..." : "Orchestrator")}
 							</TopbarButton>
 						)}
 						{/* Inspector collapse (worker sessions only — orchestrators have no rail). */}
 						{!isOrchestrator && (
 							<TopbarButton
-								aria-label={isInspectorOpen ? "Close inspector panel" : "Open inspector panel"}
+									aria-label={t(isInspectorOpen ? "Close inspector panel" : "Open inspector panel")}
 								aria-pressed={isInspectorOpen}
 								onClick={toggleInspector}
 								style={noDragStyle}
@@ -275,6 +277,7 @@ export function TopbarKillButton({
 	orchestratorId?: string;
 	onKilled: (workspaceId: string, orchestratorId?: string) => void;
 }) {
+	const { t } = useI18n();
 	const queryClient = useQueryClient();
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -303,16 +306,16 @@ export function TopbarKillButton({
 		return (
 			<div className="inline-flex items-center gap-1.5" style={noDragStyle}>
 				<TopbarButton
-					aria-label="Confirm kill"
+						aria-label={t("Confirm kill")}
 					disabled={kill.isPending}
 					onClick={() => kill.mutate()}
 					variant="killConfirm"
 				>
 					<Square className="size-icon-md" aria-hidden="true" />
-					{kill.isPending ? "Killing…" : "Confirm kill"}
+						{t(kill.isPending ? "Killing..." : "Confirm kill")}
 				</TopbarButton>
 				<TopbarButton disabled={kill.isPending} onClick={() => setConfirming(false)} variant="killCancel">
-					Cancel
+						{t("Cancel")}
 				</TopbarButton>
 				{error ? <TopbarKillError>{error}</TopbarKillError> : null}
 			</div>
@@ -321,23 +324,24 @@ export function TopbarKillButton({
 
 	return (
 		<TopbarButton
-			aria-label="Kill session"
+				aria-label={t("Kill session")}
 			onClick={() => {
 				setError(null);
 				setConfirming(true);
 			}}
 			style={noDragStyle}
-			title="Kill session"
+				title={t("Kill session")}
 			variant="kill"
 		>
 			<Trash2 className="size-icon-sm" aria-hidden="true" />
-			Kill
+				{t("Kill")}
 		</TopbarButton>
 	);
 }
 
 function SessionStatusPill({ session }: { session: WorkspaceSession }) {
+	const { t } = useI18n();
 	const activityState = session.activity?.state ?? "unknown";
 	const { label, tone, breathe } = TOPBAR_ACTIVITY_PILL[activityState];
-	return <StatusPill label={label} tone={tone} breathe={breathe} leading="none" />;
+	return <StatusPill label={t(label)} tone={tone} breathe={breathe} leading="none" />;
 }
