@@ -37,7 +37,7 @@ function useCanGoForward(): boolean {
 	return canGoForward;
 }
 
-export function TitlebarNav() {
+export function TitlebarNav({ historyLocked = false }: { historyLocked?: boolean }) {
 	const { t } = useI18n();
 	const { isSidebarOpen, toggleSidebar } = useUiStore();
 	const router = useRouter();
@@ -54,15 +54,20 @@ export function TitlebarNav() {
 			<TitlebarButton
 				label={t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")}
 				onClick={toggleSidebar}
-				title={`${isSidebarOpen ? "Collapse" : "Expand"} sidebar · ⌘B`}
+				title={`${t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")} · ⌘B`}
 			>
 				<PanelLeft className="size-icon-lg" aria-hidden="true" />
 			</TitlebarButton>
-			<TitlebarButton disabled={!canGoBack} label={t("Go back")} onClick={() => router.history.back()} title={t("Go back")}>
+			<TitlebarButton
+				disabled={historyLocked || !canGoBack}
+				label={t("Go back")}
+				onClick={() => router.history.back()}
+				title={t("Go back")}
+			>
 				<ArrowLeft className="size-icon-lg" aria-hidden="true" />
 			</TitlebarButton>
 			<TitlebarButton
-				disabled={!canGoForward}
+				disabled={historyLocked || !canGoForward}
 				label={t("Go forward")}
 				onClick={() => router.history.forward()}
 				title={t("Go forward")}
@@ -89,7 +94,8 @@ function TitlebarButton({
 	return (
 		<button
 			aria-label={label}
-			className="grid size-control-md place-items-center rounded-md text-passive transition-colors hover:bg-interactive-hover hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-45"
+			aria-disabled={disabled || undefined}
+			className="grid size-control-md place-items-center rounded-md text-passive transition-colors hover:bg-interactive-hover hover:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-passive"
 			disabled={disabled}
 			onClick={onClick}
 			style={noDragStyle}

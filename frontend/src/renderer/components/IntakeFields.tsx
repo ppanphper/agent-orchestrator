@@ -1,5 +1,6 @@
 import { Info } from "lucide-react";
 import type { components } from "../../api/schema";
+import { cn } from "../lib/utils";
 import { Label } from "./ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useI18n } from "../lib/i18n";
@@ -83,6 +84,8 @@ export function IntakeFields({
 	onChange,
 	repoPreview,
 	compact = false,
+	controlClassName,
+	labelClassName,
 }: {
 	form: IntakeForm;
 	onChange: (patch: Partial<IntakeForm>) => void;
@@ -90,6 +93,8 @@ export function IntakeFields({
 	// compact drops the descriptive/help prose and folds the explanation into an
 	// info-icon tooltip — used by the create-project sheet, which stays minimal.
 	compact?: boolean;
+	controlClassName?: string;
+	labelClassName?: string;
 }) {
 	const { t } = useI18n();
 	const needsRule = intakeNeedsRule(form);
@@ -130,7 +135,7 @@ export function IntakeFields({
 			{form.enabled && (
 				<>
 					{repoPreview && (
-						<IntakeField label={t("Repository")}>
+						<IntakeField label="Repository" labelClassName={labelClassName}>
 							{repoPreview.value ? (
 								<a
 									href={`https://github.com/${repoPreview.value}`}
@@ -147,10 +152,13 @@ export function IntakeFields({
 							)}
 						</IntakeField>
 					)}
-					<IntakeField label={t("Assignee")} htmlFor="intakeAssignee">
+					<IntakeField label="Assignee" htmlFor="intakeAssignee" labelClassName={labelClassName}>
 						<input
 							id="intakeAssignee"
-							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
+							className={cn(
+								"h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak",
+								controlClassName,
+							)}
 							value={form.assignee}
 							onChange={(e) => onChange({ assignee: e.target.value })}
 							placeholder={t("type username or * for any")}
@@ -165,10 +173,20 @@ export function IntakeFields({
 	);
 }
 
-function IntakeField({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
+function IntakeField({
+	label,
+	htmlFor,
+	labelClassName,
+	children,
+}: {
+	label: string;
+	htmlFor?: string;
+	labelClassName?: string;
+	children: React.ReactNode;
+}) {
 	return (
 		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
+			<Label htmlFor={htmlFor} className={cn("text-xs text-muted-foreground", labelClassName)}>
 				{label}
 			</Label>
 			{children}

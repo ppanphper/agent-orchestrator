@@ -53,10 +53,10 @@ describe("I18nProvider", () => {
 			</I18nProvider>,
 		);
 
-		await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
-		await userEvent.click(screen.getByRole("option", { name: "Simplified Chinese" }));
+		await userEvent.click(screen.getByRole("button", { name: "Language" }));
+		await userEvent.click(screen.getByRole("menuitem", { name: "Simplified Chinese" }));
 
-		expect(screen.getByRole("combobox", { name: "语言" })).toHaveTextContent("简体中文");
+		expect(screen.getByRole("button", { name: "语言" })).toHaveTextContent("简体中文");
 		await waitFor(() => expect(window.localStorage.getItem(localeStorageKey)).toBe("zh-CN"));
 	});
 });

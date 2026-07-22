@@ -1,25 +1,37 @@
-import { DashboardSubhead } from "./DashboardSubhead";
-import { MigrationSection } from "./MigrationSection";
-import { UpdatesSection } from "./UpdatesSection";
+import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { Mail } from "lucide-react";
+import { ConnectMobileModal } from "./ConnectMobileModal";
 import { LanguageSection } from "./LanguageSection";
+import { GeneralSettingsSection } from "./settings/GeneralSettingsSection";
+import { ReportProblemDialog } from "./settings/ReportProblemDialog";
+import { SettingsLinkRow } from "./settings/SettingsRow";
+import { SettingsPageShell } from "./settings/SettingsPageShell";
+import { SettingsPanel } from "./settings/SettingsPanel";
+import { SettingsSection } from "./settings/SettingsSection";
+import { UpdatesSection } from "./settings/UpdatesSection";
 import { useI18n } from "../lib/i18n";
 
-// App-wide settings, shown from the sidebar when no project is selected. Each
-// section is a self-contained card: Updates (auto-update channel, #2207) and
-// Migration (re-run the legacy-AO import, #2205). Connect Mobile lives in the
-// sidebar Settings menu, not here.
 export function GlobalSettingsForm() {
 	const { t } = useI18n();
+	const navigate = useNavigate();
+	const [mobileOpen, setMobileOpen] = useState(false);
+	const [reportProblemOpen, setReportProblemOpen] = useState(false);
+
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<DashboardSubhead title={t("Global settings")} subtitle={t("Settings that apply across all projects")} />
-			<div className="min-h-0 flex-1 overflow-y-auto p-4.5">
-				<div className="mx-auto flex max-w-2xl flex-col gap-4">
+		<>
+			<SettingsPageShell>
+				<SettingsPanel onClose={() => navigate({ to: "/" })}>
+					<GeneralSettingsSection onConnectMobile={() => setMobileOpen(true)} />
 					<LanguageSection />
 					<UpdatesSection />
-					<MigrationSection />
-				</div>
-			</div>
-		</div>
+					<SettingsSection title={t("Get help")}>
+						<SettingsLinkRow icon={Mail} label={t("Report a problem")} onClick={() => setReportProblemOpen(true)} />
+					</SettingsSection>
+				</SettingsPanel>
+			</SettingsPageShell>
+			<ConnectMobileModal open={mobileOpen} onOpenChange={setMobileOpen} />
+			<ReportProblemDialog open={reportProblemOpen} onOpenChange={setReportProblemOpen} />
+		</>
 	);
 }
