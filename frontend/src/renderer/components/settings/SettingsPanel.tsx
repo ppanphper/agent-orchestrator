@@ -9,7 +9,12 @@ import { useI18n } from "../../lib/i18n";
 export function SettingsPanel({ children, onClose }: { children: ReactNode; onClose: () => void }) {
 	const { t } = useI18n();
 	return (
-		<div className="flex h-full min-h-0 w-full justify-center overflow-y-auto" aria-label={t("Settings")}>
+		<div
+			className="flex h-full min-h-0 w-full justify-center overflow-y-auto"
+			aria-label={t("Settings")}
+			// Stable hook for the renderer smoke suite (settings page mounted).
+			data-testid="settings-page"
+		>
 			<div className="flex w-full max-w-(--size-settings-content-width) flex-col items-stretch gap-(--size-settings-section-gap) px-(--size-settings-panel-padding-x) pb-(--size-settings-panel-padding-bottom) pt-(--size-settings-panel-padding-top)">
 				<div className="flex shrink-0 items-start justify-between gap-4 self-stretch">
 					<h1 className="text-settings-heading font-bold text-settings-title">{t("Settings")}</h1>

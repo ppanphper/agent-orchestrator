@@ -109,7 +109,7 @@ export function MigrationSection() {
 				: t("Run migration");
 
 	return (
-		<Card>
+		<Card data-testid="settings-section" data-section="migration">
 			<CardHeader>
 				<CardTitle className="text-control">{t("Migration")}</CardTitle>
 			</CardHeader>

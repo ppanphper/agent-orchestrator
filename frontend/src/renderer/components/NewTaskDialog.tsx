@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X } from "lucide-react";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { ImagePlus, Loader2, X } from "lucide-react";
+import { type ClipboardEvent, type DragEvent, type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -12,6 +12,8 @@ import { captureRendererEvent } from "../lib/telemetry";
 import type { AgentProvider } from "../types/workspace";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
 import { useI18n } from "../lib/i18n";
+import { useImageAttachments } from "../hooks/useImageAttachments";
+import { cn } from "../lib/utils";
 
 type Project = components["schemas"]["Project"];
 
@@ -36,6 +38,16 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 	const [agentTouched, setAgentTouched] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | undefined>();
+	const [isDragging, setIsDragging] = useState(false);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const {
+		attachments,
+		error: attachmentError,
+		addFiles,
+		remove: removeAttachment,
+		clear: clearAttachments,
+		toPayload,
+	} = useImageAttachments();
 
 	const projectQuery = useQuery({
 		queryKey: ["project", projectId],
@@ -69,8 +81,10 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 			setAgentTouched(false);
 			setError(undefined);
 			setIsSubmitting(false);
+			setIsDragging(false);
+			clearAttachments();
 		}
-	}, [open]);
+	}, [open, clearAttachments]);
 
 	useEffect(() => {
 		if (open && !agentTouched) {
@@ -86,7 +100,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		const cleanPrompt = prompt.trim();
 		const cleanBranch = branch.trim();
 		if (!cleanTitle || !cleanPrompt) {
-				setError(t("Title and brief are required."));
+			setError(t("Title and brief are required."));
 			return;
 		}
 
@@ -102,6 +116,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 					issueId: cleanTitle,
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
+					attachments: attachments.length > 0 ? toPayload() : undefined,
 				},
 			});
 			if (apiError) throw new Error(apiErrorMessage(apiError, "Unable to start task"));
@@ -118,6 +133,29 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 		}
 	};
 
+	const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+		const files = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/"));
+		if (files.length === 0) return;
+		// An image is on the clipboard: attach it instead of pasting a file path
+		// or nothing into the textarea.
+		event.preventDefault();
+		void addFiles(files);
+	};
+
+	const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+		event.preventDefault();
+		setIsDragging(false);
+		const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith("image/"));
+		if (files.length > 0) void addFiles(files);
+	};
+
+	const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+		if (Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
+			event.preventDefault();
+			setIsDragging(true);
+		}
+	};
+
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
@@ -125,16 +163,16 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 				<Dialog.Content className="fixed left-1/2 top-1/2 z-overlay w-dialog-xl -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in">
 					<div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
 						<div className="min-w-0">
-								<Dialog.Title className="text-subtitle font-semibold text-foreground">{t("New task")}</Dialog.Title>
+							<Dialog.Title className="text-subtitle font-semibold text-foreground">{t("New task")}</Dialog.Title>
 							<Dialog.Description className="mt-1 text-xs text-muted-foreground">
-									{t("Start a worker directly from this project.")}
+								{t("Start a worker directly from this project.")}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
 							<button
 								type="button"
 								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground"
-									aria-label={t("Close new task dialog")}
+								aria-label={t("Close new task dialog")}
 							>
 								<X className="size-icon-base" aria-hidden="true" />
 							</button>
@@ -144,7 +182,7 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 					<form onSubmit={submit} className="space-y-4 px-5 py-4">
 						<div className="space-y-1.5">
 							<label className="text-xs font-medium text-muted-foreground" htmlFor={titleId}>
-									{t("Title")}
+								{t("Title")}
 							</label>
 							<Input
 								id={titleId}
@@ -156,24 +194,99 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 						</div>
 
 						<div className="space-y-1.5">
-							<label className="text-xs font-medium text-muted-foreground" htmlFor={promptId}>
+							<div className="flex items-center justify-between">
+								<label className="text-xs font-medium text-muted-foreground" htmlFor={promptId}>
 									{t("Brief")}
-							</label>
-							<textarea
-								id={promptId}
-								className="min-h-textarea-min w-full resize-y rounded-md border border-border bg-transparent px-3 py-2 text-control leading-relaxed text-foreground outline-none transition placeholder:text-passive focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent-weak"
-									placeholder={t("Describe the change, constraints, and expected verification.")}
-								value={prompt}
-								onChange={(event) => setPrompt(event.target.value)}
+								</label>
+								<button
+									type="button"
+									className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+									onClick={() => fileInputRef.current?.click()}
+								>
+									<ImagePlus className="size-icon-sm" aria-hidden="true" />
+									{t("Add image")}
+								</button>
+							</div>
+							<div
+								className={cn(
+									"rounded-md border border-border transition",
+									isDragging && "border-accent ring-2 ring-accent-weak",
+								)}
+								onDrop={handleDrop}
+								onDragOver={handleDragOver}
+								onDragLeave={() => setIsDragging(false)}
+							>
+								<textarea
+									id={promptId}
+									className="min-h-textarea-min w-full resize-y rounded-md bg-transparent px-3 py-2 text-control leading-relaxed text-foreground outline-none transition placeholder:text-passive focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent-weak"
+									placeholder={t(
+										"Describe the change, constraints, and expected verification. Paste or drop images to attach them.",
+									)}
+									value={prompt}
+									onChange={(event) => setPrompt(event.target.value)}
+									onPaste={handlePaste}
+									onKeyDown={(event) => {
+										// Chat-style, matching Claude Code / Codex. Submit affordances:
+										// plain Enter, and Cmd+Enter / Ctrl+Enter (common chat-send combos)
+										// which pass this guard because we only exclude Shift and Alt.
+										// Do NOT submit: Shift+Enter and Alt+Enter — both insert a newline
+										// (Alt is excluded so it can't submit by accident). Guard against IME
+										// composition so committing a CJK candidate with Enter doesn't submit.
+										if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing) {
+											event.preventDefault();
+											event.currentTarget.form?.requestSubmit();
+										}
+									}}
+								/>
+								{attachments.length > 0 && (
+									<ul className="grid max-h-40 grid-cols-2 gap-2 overflow-y-auto border-t border-border p-2 sm:grid-cols-3">
+										{attachments.map((attachment, index) => (
+											<li
+												key={attachment.id}
+												className="flex items-center gap-2 rounded-md border border-border bg-surface p-1 text-xs text-foreground"
+											>
+												<img
+													src={attachment.dataUrl}
+													alt={t("Image {index}", { index: index + 1 })}
+													className="size-7 shrink-0 rounded object-cover"
+												/>
+												<span className="min-w-0 flex-1 truncate font-medium">
+													{t("Image {index}", { index: index + 1 })}
+												</span>
+												<button
+													type="button"
+													className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition hover:bg-border hover:text-foreground"
+													aria-label={t("Remove image {index}", { index: index + 1 })}
+													onClick={() => removeAttachment(attachment.id)}
+												>
+													<X className="size-icon-sm" aria-hidden="true" />
+												</button>
+											</li>
+										))}
+									</ul>
+								)}
+							</div>
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept="image/*"
+								multiple
+								className="hidden"
+								onChange={(event) => {
+									if (event.target.files) void addFiles(event.target.files);
+									event.target.value = "";
+								}}
 							/>
+							{attachmentError && <p className="text-caption text-destructive">{attachmentError}</p>}
+							<p className="text-caption text-muted-foreground">{t("Enter to start · Shift+Enter for a new line")}</p>
 						</div>
 
 						<div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
 							<div className="space-y-1.5">
 								<RequiredAgentField
 									id={agentId}
-										label={t("Agent")}
-										placeholder={t("Project default")}
+									label={t("Agent")}
+									placeholder={t("Project default")}
 									value={agent}
 									authorized={agentCatalog?.authorized}
 									installed={agentCatalog?.installed}
@@ -190,16 +303,16 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 									disabled={refreshAgentsMutation.isPending}
 									onClick={() => refreshAgentsMutation.mutate()}
 								>
-										{t(refreshAgentsMutation.isPending ? "Refreshing agents..." : "Refresh agents")}
+									{t(refreshAgentsMutation.isPending ? "Refreshing agents..." : "Refresh agents")}
 								</button>
 							</div>
 							<div className="space-y-1.5">
 								<Label className="text-xs font-medium text-muted-foreground" htmlFor={branchId}>
-										{t("Branch")}
+									{t("Branch")}
 								</Label>
 								<Input
 									id={branchId}
-										placeholder={t("optional")}
+									placeholder={t("optional")}
 									value={branch}
 									onChange={(event) => setBranch(event.target.value)}
 								/>
@@ -223,12 +336,12 @@ export function NewTaskDialog({ open, projectId, onCreated, onOpenChange }: NewT
 						<div className="flex items-center justify-end gap-2 pt-1">
 							<Dialog.Close asChild>
 								<Button type="button" variant="ghost" disabled={isSubmitting}>
-										{t("Cancel")}
+									{t("Cancel")}
 								</Button>
 							</Dialog.Close>
 							<Button type="submit" disabled={isSubmitting || !projectId}>
 								{isSubmitting ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
-									{t(isSubmitting ? "Starting..." : "Start task")}
+								{t(isSubmitting ? "Starting..." : "Start task")}
 							</Button>
 						</div>
 					</form>
