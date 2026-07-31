@@ -67,7 +67,11 @@ function TopMenu({
 	);
 }
 
-export function WindowTitlebar() {
+export function WindowTitlebar({
+	onSidebarPreviewEnter,
+}: {
+	onSidebarPreviewEnter?: React.PointerEventHandler<HTMLButtonElement>;
+}) {
 	const { t } = useI18n();
 	const navigate = useNavigate();
 	const theme = useResolvedTheme();
@@ -105,10 +109,11 @@ export function WindowTitlebar() {
 			    cluster, so it stays in sync with the SidebarProvider. The brand
 			    logo + name stay in the sidebar header instead of duplicating here. */}
 			<button
-				aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+				aria-label={t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")}
 				className="window-titlebar__toggle"
 				onClick={toggleSidebar}
-				title={`${isSidebarOpen ? "Collapse" : "Expand"} sidebar · Ctrl+B`}
+				onPointerEnter={onSidebarPreviewEnter}
+				title={`${t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")} · Ctrl+B`}
 				type="button"
 			>
 				<PanelLeft aria-hidden="true" className="window-titlebar__toggle-icon" />
@@ -183,7 +188,7 @@ export function WindowTitlebar() {
 						<DropdownMenuShortcut>Ctrl+/</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
-					<DropdownMenuItem onSelect={act("help.about")}>About Agent Orchestrator</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("help.about")}>{t("About Agent Orchestrator")}</DropdownMenuItem>
 				</TopMenu>
 			</nav>
 		</header>

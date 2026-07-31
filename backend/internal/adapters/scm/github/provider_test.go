@@ -106,6 +106,45 @@ func newProviderForTest(t *testing.T, f *fakeGH) *Provider {
 
 func ctx() context.Context { return context.Background() }
 
+func TestAuthenticatedIdentityCachesHumanUser(t *testing.T) {
+	f := newFakeGH(t)
+	f.on(http.MethodGet, "/user", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"login": "Alice", "type": "User"})
+	})
+	p := newProviderForTest(t, f)
+
+	first, err := p.AuthenticatedIdentity(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := p.AuthenticatedIdentity(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != (ports.SCMIdentity{Login: "Alice", Human: true}) || second != first {
+		t.Fatalf("identities = %#v, %#v", first, second)
+	}
+	if got := f.callsTo(http.MethodGet, "/user"); got != 1 {
+		t.Fatalf("GET /user calls = %d, want 1", got)
+	}
+}
+
+func TestAuthenticatedIdentityClassifiesBot(t *testing.T) {
+	f := newFakeGH(t)
+	f.on(http.MethodGet, "/user", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"login": "ao-bot", "type": "Bot"})
+	})
+	p := newProviderForTest(t, f)
+
+	got, err := p.AuthenticatedIdentity(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != (ports.SCMIdentity{Login: "ao-bot", Human: false}) {
+		t.Fatalf("identity = %#v", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Fixture builders. Each test composes a REST pull + GraphQL response so
 // it can pin the exact shape it cares about without sharing global state
@@ -1375,6 +1414,9 @@ func TestFetchReviewThreadsUsesLatestWindowWithoutFallbackWhenOldestResolved(t *
 		if !strings.Contains(string(body), "reviews(last:20, states:[APPROVED,CHANGES_REQUESTED])") {
 			t.Fatalf("review query should fetch decisive review summaries, body=%s", body)
 		}
+		if !strings.Contains(string(body), "submittedAt body author") {
+			t.Fatalf("review query should request the review body, body=%s", body)
+		}
 		if !strings.Contains(string(body), "comments(first:5)") {
 			t.Fatalf("review query should cap comments per thread, body=%s", body)
 		}
@@ -1387,6 +1429,7 @@ func TestFetchReviewThreadsUsesLatestWindowWithoutFallbackWhenOldestResolved(t *
 					"state":       "CHANGES_REQUESTED",
 					"url":         "https://github.com/o/r/pull/1#pullrequestreview-1",
 					"submittedAt": "2026-06-15T00:00:00Z",
+					"body":        "please address the failing test",
 					"author":      map[string]any{"login": "alice", "__typename": "User"},
 				}}},
 				"reviewThreads": map[string]any{
@@ -1412,7 +1455,7 @@ func TestFetchReviewThreadsUsesLatestWindowWithoutFallbackWhenOldestResolved(t *
 	if len(review.Threads) != 1 || review.Threads[0].ID != "latest-resolved" {
 		t.Fatalf("threads = %#v", review.Threads)
 	}
-	if len(review.Reviews) != 1 || review.Reviews[0].Author != "alice" || review.Reviews[0].URL != "https://github.com/o/r/pull/1#pullrequestreview-1" {
+	if len(review.Reviews) != 1 || review.Reviews[0].Author != "alice" || review.Reviews[0].URL != "https://github.com/o/r/pull/1#pullrequestreview-1" || review.Reviews[0].Body != "please address the failing test" {
 		t.Fatalf("reviews = %#v", review.Reviews)
 	}
 	if len(review.Threads[0].Comments) != 1 || review.Threads[0].Comments[0].URL != "https://github.com/o/r/pull/1#discussion_r1" {

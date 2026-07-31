@@ -1,20 +1,43 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import {
+	Bot,
+	Fingerprint,
+	FolderGit2,
+	FolderOpen,
+	GitBranch,
+	Hash,
+	Layers,
+	Link,
+	Network,
+	RefreshCw,
+	ScanEye,
+	Shield,
+	Sparkles,
+	Tag,
+	TriangleAlert,
+	type LucideIcon,
+} from "lucide-react";
 import type { components } from "../../api/schema";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { buildRankedAgentOptions } from "../lib/agent-select-options";
 import { captureRendererEvent } from "../lib/telemetry";
-import { spawnOrchestrator } from "../lib/spawn-orchestrator";
-import { newestActiveOrchestrator } from "../types/workspace";
-import { RequiredAgentField } from "./CreateProjectAgentSheet";
-import { DashboardSubhead } from "./DashboardSubhead";
-import { buildIntake, deriveGitHubRepo, IntakeFields, type IntakeForm, intakeNeedsRule } from "./IntakeFields";
-import { Button } from "./ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useI18n } from "../lib/i18n";
+import { spawnOrchestrator } from "../lib/spawn-orchestrator";
+import { cn } from "../lib/utils";
+import { newestActiveOrchestrator } from "../types/workspace";
+import { AgentAvatar } from "./AgentAvatar";
+import { RequiredAgentField } from "./CreateProjectAgentSheet";
+import { buildIntake, deriveGitHubRepo, IntakeFields, type IntakeForm, intakeNeedsRule } from "./IntakeFields";
+import { AgentSelectMenuItem } from "./settings/AgentSelectMenuItem";
+import { SettingsOptionMenu } from "./settings/SettingsOptionMenu";
+import { SettingsPageShell } from "./settings/SettingsPageShell";
+import { SettingsPanel } from "./settings/SettingsPanel";
+import { SettingsRow } from "./settings/SettingsRow";
+import { SettingsSection } from "./settings/SettingsSection";
 
 type Project = components["schemas"]["Project"];
 type ProjectConfig = components["schemas"]["ProjectConfig"];
@@ -27,13 +50,15 @@ const PERMISSION_MODE_OPTIONS = [
 	{ value: "bypass-permissions", label: "Bypass permissions" },
 ] as const;
 
-const REVIEWER_OPTIONS = ["claude-code", "codex", "opencode"] as const;
+const KNOWN_REVIEWER_HARNESS_IDS = new Set(["claude-code", "codex", "opencode"]);
 
 const projectQueryKey = (id: string) => ["project", id] as const;
 
 export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 	const { t } = useI18n();
+	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const closeSettings = () => navigate({ to: "/projects/$projectId", params: { projectId } });
 
 	const query = useQuery({
 		queryKey: projectQueryKey(projectId),
@@ -47,27 +72,25 @@ export function ProjectSettingsForm({ projectId }: { projectId: string }) {
 		},
 	});
 
-	if (query.isLoading) {
-		return <CenteredNote>{t("Loading project settings...")}</CenteredNote>;
-	}
-	if (query.isError || !query.data) {
-		return (
-			<CenteredNote>{query.error instanceof Error ? query.error.message : t("Could not load project.")}</CenteredNote>
-		);
-	}
-
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
-			<DashboardSubhead title={t("Settings")} subtitle={query.data.path} />
-			<div className="min-h-0 flex-1 overflow-y-auto p-4.5">
-				<SettingsBody
-					key={projectId}
-					project={query.data}
-					onSaved={() => queryClient.invalidateQueries({ queryKey: workspaceQueryKey })}
-					projectId={projectId}
-				/>
-			</div>
-		</div>
+		<SettingsPageShell>
+			<SettingsPanel onClose={closeSettings} subtitle={query.data?.path}>
+				{query.isLoading ? (
+					<p className="text-sm text-settings-muted">{t("Loading project settings...")}</p>
+				) : query.isError || !query.data ? (
+					<p className="text-sm text-error">
+						{query.error instanceof Error ? query.error.message : t("Could not load project.")}
+					</p>
+				) : (
+					<SettingsBody
+						key={projectId}
+						project={query.data}
+						onSaved={() => queryClient.invalidateQueries({ queryKey: workspaceQueryKey })}
+						projectId={projectId}
+					/>
+				)}
+			</SettingsPanel>
+		</SettingsPageShell>
 	);
 }
 
@@ -76,10 +99,12 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 	const queryClient = useQueryClient();
 	const workspaceQuery = useWorkspaceQuery();
 	const config = project.config ?? {};
+	const isScratchProject = project.kind === "scratch";
 	const workspace = workspaceQuery.data?.find((item) => item.id === projectId);
 	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
 	const [form, setForm] = useState({
+		displayName: project.name,
 		defaultBranch: config.defaultBranch ?? project.defaultBranch ?? "",
 		sessionPrefix: config.sessionPrefix ?? "",
 		workerAgent: config.worker?.agent ?? "",
@@ -103,10 +128,6 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 		onSuccess: (next) => queryClient.setQueryData(agentsQueryKey, next),
 	});
 
-	// The Electron app only registers git projects today, so the daemon always has a usable
-	// git origin to derive owner/repo from (trackerRepo() in observer.go) when
-	// trackerIntake.repo is unset — there's no manual override input here. This mirrors that
-	// same derivation client-side purely for display (a link to the repo being polled).
 	const intakeForm: IntakeForm = {
 		enabled: form.intakeEnabled,
 		repo: form.intakeRepo,
@@ -120,30 +141,40 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 			intakeAssignee: patch.assignee ?? f.intakeAssignee,
 		}));
 	const effectiveIntakeRepo = form.intakeRepo.trim() || deriveGitHubRepo(project.repo);
-	const intakeIncomplete = intakeNeedsRule(intakeForm);
+	const intakeIncomplete = !isScratchProject && intakeNeedsRule(intakeForm);
 
 	const mutation = useMutation({
 		mutationFn: async () => {
 			void captureRendererEvent("ao.renderer.settings_save_requested", { project_id: projectId });
-			// PUT replaces the whole config; merge the edited fields over what loaded
-			// so we don't drop env/symlinks/postCreate the form doesn't expose.
-			const next: ProjectConfig = {
-				...config,
-				defaultBranch: form.defaultBranch || undefined,
-				sessionPrefix: form.sessionPrefix || undefined,
-				worker: { ...config.worker, agent: form.workerAgent },
-				orchestrator: { ...config.orchestrator, agent: form.orchestratorAgent },
-				agentConfig: blankToUndefined({
-					...config.agentConfig,
-					model: form.model || undefined,
-					permissions: form.permissions || undefined,
-				}),
-				reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
-				trackerIntake: buildIntake(intakeForm),
-			};
-			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
+			const displayName = form.displayName.trim();
+			const next: ProjectConfig = isScratchProject
+				? {
+						...scratchSupportedConfig(config),
+						worker: { ...config.worker, agent: form.workerAgent },
+						orchestrator: { ...config.orchestrator, agent: form.orchestratorAgent },
+						agentConfig: blankToUndefined({
+							...config.agentConfig,
+							model: form.model || undefined,
+							permissions: form.permissions || undefined,
+						}),
+					}
+				: {
+						...config,
+						defaultBranch: form.defaultBranch || undefined,
+						sessionPrefix: form.sessionPrefix || undefined,
+						worker: { ...config.worker, agent: form.workerAgent },
+						orchestrator: { ...config.orchestrator, agent: form.orchestratorAgent },
+						agentConfig: blankToUndefined({
+							...config.agentConfig,
+							model: form.model || undefined,
+							permissions: form.permissions || undefined,
+						}),
+						reviewers: form.reviewerHarness ? [{ harness: form.reviewerHarness }] : undefined,
+						trackerIntake: buildIntake(intakeForm),
+					};
+			const { error } = await apiClient.PUT("/api/v1/projects/{id}", {
 				params: { path: { id: projectId } },
-				body: { config: next },
+				body: { displayName, config: next },
 			});
 			if (error) throw new Error(apiErrorMessage(error));
 			if (
@@ -175,273 +206,394 @@ function SettingsBody({ project, projectId, onSaved }: { project: Project; proje
 
 	return (
 		<form
-			className="mx-auto flex max-w-2xl flex-col gap-4"
+			className="flex w-full flex-col gap-(--size-settings-section-gap)"
 			onSubmit={(event) => {
 				event.preventDefault();
 				setSavedAt(null);
 				setReplacementError(null);
 				if (missingRequiredAgent) {
-					setValidationError("Worker and orchestrator agents are required.");
+					setValidationError(t("Worker and orchestrator agents are required."));
+					return;
+				}
+				if (form.displayName.trim() === "") {
+					setValidationError(t("Project name is required."));
 					return;
 				}
 				if (intakeIncomplete) {
-					setValidationError("Enabling intake requires an assignee.");
+					setValidationError(t("Enabling intake requires an assignee."));
 					return;
 				}
 				setValidationError(null);
 				mutation.mutate();
 			}}
 		>
-			<Card>
-				<CardHeader>
-					<CardTitle className="text-control">{t("Identity")}</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
-					<ReadonlyRow label="id" value={project.id} />
-					<ReadonlyRow label="kind" value={project.kind === "workspace" ? "workspace" : "single repo"} />
-					<ReadonlyRow label="path" value={project.path} />
-					<ReadonlyRow label="repo" value={project.repo || "—"} />
-				</CardContent>
-			</Card>
+			<SettingsSection title={t("Identity")}>
+				<SettingsInputRow
+					icon={Tag}
+					label={t("Project name")}
+					id="projectName"
+					value={form.displayName}
+					onChange={(value) => setForm((f) => ({ ...f, displayName: value }))}
+				/>
+				<SettingsValueRow icon={Fingerprint} label="id" value={project.id} />
+				<SettingsValueRow icon={Layers} label="kind" value={t(projectKindLabel(project.kind))} />
+				<SettingsValueRow icon={FolderOpen} label="path" value={project.path} />
+				<SettingsValueRow icon={Link} label="repo" value={project.repo || "—"} />
+			</SettingsSection>
 
 			{project.kind === "workspace" && (
-				<Card>
-					<CardHeader>
-						<CardTitle className="text-[13px]">{t("Workspace repos")}</CardTitle>
-					</CardHeader>
-					<CardContent className="flex flex-col gap-2">
-						{project.workspaceRepos?.length ? (
-							project.workspaceRepos.map((repo) => (
-								<div
-									key={repo.name}
-									className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-3 rounded-md border border-border px-3 py-2 font-mono text-[12px]"
-								>
-									<span className="truncate text-foreground">{repo.name}</span>
-									<span className="min-w-0 truncate text-muted-foreground">
-										{repo.relativePath}
-										{repo.repo ? ` · ${repo.repo}` : ""}
-									</span>
-								</div>
-							))
-						) : (
-							<p className="text-[12px] text-muted-foreground">{t("No child repositories are registered.")}</p>
-						)}
-					</CardContent>
-				</Card>
+				<SettingsSection title={t("Workspace repos")}>
+					{project.workspaceRepos?.length ? (
+						project.workspaceRepos.map((repo) => (
+							<SettingsRow key={repo.name} icon={FolderGit2} label={repo.name}>
+								<span className="settings-row-value">
+									{repo.relativePath}
+									{repo.repo ? ` · ${repo.repo}` : ""}
+								</span>
+							</SettingsRow>
+						))
+					) : (
+						<p className="px-1 text-xs text-settings-muted">{t("No child repositories are registered.")}</p>
+					)}
+				</SettingsSection>
 			)}
 
-			<Card>
-				<CardHeader>
-						<CardTitle className="text-control">{t("Worktrees")}</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-4">
-						<Field label={t("Default branch")} htmlFor="defaultBranch">
-						<input
-							id="defaultBranch"
-							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
-							value={form.defaultBranch}
-							onChange={(e) => setForm((f) => ({ ...f, defaultBranch: e.target.value }))}
-							placeholder="main"
-						/>
-					</Field>
-						<Field label={t("Session prefix")} htmlFor="sessionPrefix">
-						<input
-							id="sessionPrefix"
-							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
-							value={form.sessionPrefix}
-							onChange={(e) => setForm((f) => ({ ...f, sessionPrefix: e.target.value }))}
-							placeholder="ao"
-						/>
-					</Field>
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-						<CardTitle className="text-control">{t("Agents")}</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-4">
-					<RequiredAgentField
-						id="workerAgent"
-						value={form.workerAgent}
-							placeholder={t("Select worker agent")}
-							label={t("Default worker agent")}
-						authorized={agentCatalog?.authorized}
-						installed={agentCatalog?.installed}
-						supported={agentCatalog?.supported}
-						disabled={agentsQuery.isFetching && agentCatalog === undefined}
-						invalid={validationError !== null && form.workerAgent === ""}
-						onChange={(v) => setForm((f) => ({ ...f, workerAgent: v }))}
+			{!isScratchProject && (
+				<SettingsSection title={t("Worktrees")}>
+					<SettingsInputRow
+						icon={GitBranch}
+						label={t("Default branch")}
+						id="defaultBranch"
+						value={form.defaultBranch}
+						placeholder="main"
+						onChange={(value) => setForm((f) => ({ ...f, defaultBranch: value }))}
 					/>
-					<RequiredAgentField
-						id="orchestratorAgent"
-						value={form.orchestratorAgent}
-							placeholder={t("Select orchestrator agent")}
-							label={t("Default orchestrator agent")}
-						authorized={agentCatalog?.authorized}
-						installed={agentCatalog?.installed}
-						supported={agentCatalog?.supported}
-						disabled={agentsQuery.isFetching && agentCatalog === undefined}
-						invalid={validationError !== null && form.orchestratorAgent === ""}
-						onChange={(v) => setForm((f) => ({ ...f, orchestratorAgent: v }))}
+					<SettingsInputRow
+						icon={Hash}
+						label={t("Session prefix")}
+						id="sessionPrefix"
+						value={form.sessionPrefix}
+						placeholder="ao"
+						onChange={(value) => setForm((f) => ({ ...f, sessionPrefix: value }))}
 					/>
-					<div className="flex items-center justify-between gap-3 text-xs leading-row text-muted-foreground">
-							<span>{t("Agent availability is cached.")}</span>
-						<button
-							type="button"
-							className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
-							disabled={refreshAgentsMutation.isPending}
-							onClick={() => refreshAgentsMutation.mutate()}
-						>
-								{t(refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents")}
-						</button>
-					</div>
-					{refreshAgentsMutation.isError && (
-						<p className="text-xs leading-row text-error">
-							{refreshAgentsMutation.error instanceof Error
-								? refreshAgentsMutation.error.message
-								: "Could not refresh agent catalog."}
-						</p>
-					)}
-					{missingRequiredAgent && (
-							<p className="text-xs leading-row text-error">{t("Worker and orchestrator agents are required.")}</p>
-					)}
-						<Field label={t("Model override")} htmlFor="model">
-						<input
-							id="model"
-							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
-							value={form.model}
-							onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-							placeholder="(agent default)"
-						/>
-					</Field>
-						<Field label={t("Permission mode")} htmlFor="permissionMode">
-						<PermissionModeSelect
-							id="permissionMode"
-							value={form.permissions}
-							onChange={(v) => setForm((f) => ({ ...f, permissions: v }))}
-						/>
-					</Field>
-				</CardContent>
-			</Card>
+				</SettingsSection>
+			)}
 
-			<Card>
-				<CardHeader>
-						<CardTitle className="text-control">{t("Reviewers")}</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-4">
-						<Field label={t("Default reviewer agent")} htmlFor="reviewerHarness">
+			<SettingsSection title={t("Agents")}>
+				<RequiredAgentField
+					id="workerAgent"
+					variant="settings-row"
+					icon={Bot}
+					value={form.workerAgent}
+					placeholder={t("Select worker agent")}
+					label={t("Default worker agent")}
+					authorized={agentCatalog?.authorized}
+					installed={agentCatalog?.installed}
+					supported={agentCatalog?.supported}
+					disabled={agentsQuery.isFetching && agentCatalog === undefined}
+					invalid={validationError !== null && form.workerAgent === ""}
+					onChange={(v) => setForm((f) => ({ ...f, workerAgent: v }))}
+				/>
+				<RequiredAgentField
+					id="orchestratorAgent"
+					variant="settings-row"
+					icon={Network}
+					value={form.orchestratorAgent}
+					placeholder={t("Select orchestrator agent")}
+					label={t("Default orchestrator agent")}
+					authorized={agentCatalog?.authorized}
+					installed={agentCatalog?.installed}
+					supported={agentCatalog?.supported}
+					disabled={agentsQuery.isFetching && agentCatalog === undefined}
+					invalid={validationError !== null && form.orchestratorAgent === ""}
+					onChange={(v) => setForm((f) => ({ ...f, orchestratorAgent: v }))}
+				/>
+				<SettingsRow icon={RefreshCw} label={t("Refresh agents")}>
+					<button
+						type="button"
+						aria-label={t("Refresh agents")}
+						className="settings-option-trigger inline-flex items-center gap-1.5 disabled:pointer-events-none disabled:opacity-50"
+						disabled={refreshAgentsMutation.isPending}
+						onClick={() => refreshAgentsMutation.mutate()}
+					>
+						<RefreshCw className={cn("size-icon-base", refreshAgentsMutation.isPending && "animate-spin")} aria-hidden="true" />
+						{t(refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh")}
+					</button>
+				</SettingsRow>
+				{refreshAgentsMutation.isError && (
+					<p className="px-1 text-xs leading-row text-error">
+						{refreshAgentsMutation.error instanceof Error
+							? refreshAgentsMutation.error.message
+							: t("Could not refresh agent catalog.")}
+					</p>
+				)}
+				{missingRequiredAgent && (
+					<p className="px-1 text-xs leading-row text-error">{t("Worker and orchestrator agents are required.")}</p>
+				)}
+				<SettingsInputRow
+					icon={Sparkles}
+					label={t("Model override")}
+					id="model"
+					value={form.model}
+					placeholder={t("(agent default)")}
+					onChange={(value) => setForm((f) => ({ ...f, model: value }))}
+				/>
+				<SettingsRow icon={Shield} label={t("Permission mode")}>
+					<PermissionModeSelect
+						value={form.permissions}
+						onChange={(v) => setForm((f) => ({ ...f, permissions: v }))}
+					/>
+				</SettingsRow>
+				{isScratchProject && (
+					<SaveChangesFooter
+						isPending={mutation.isPending}
+						validationError={validationError}
+						mutationError={mutation.isError ? mutation.error : null}
+						savedAt={savedAt}
+						replacementError={replacementError}
+					/>
+				)}
+			</SettingsSection>
+
+			{!isScratchProject && (
+				<SettingsSection title={t("Reviewers")}>
+					<SettingsRow icon={ScanEye} label={t("Default reviewer agent")}>
 						<ReviewerSelect
-							id="reviewerHarness"
 							value={form.reviewerHarness}
 							onChange={(v) => setForm((f) => ({ ...f, reviewerHarness: v }))}
+							authorized={agentCatalog?.authorized}
+							installed={agentCatalog?.installed}
+							supported={agentCatalog?.supported}
+							disabled={agentsQuery.isFetching && agentCatalog === undefined}
 						/>
-					</Field>
-				</CardContent>
-			</Card>
+					</SettingsRow>
+				</SettingsSection>
+			)}
 
-			<Card>
-				<CardHeader>
-						<CardTitle className="text-control">{t("Tracker intake")}</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<IntakeFields form={intakeForm} onChange={patchIntake} repoPreview={{ value: effectiveIntakeRepo }} />
-				</CardContent>
-			</Card>
-
-			<div className="flex items-center gap-3">
-				<Button type="submit" variant="primary" disabled={mutation.isPending}>
-						{t(mutation.isPending ? "Saving..." : "Save changes")}
-				</Button>
-				{validationError && <span className="text-xs text-error">{validationError}</span>}
-				{mutation.isError && (
-					<span className="text-xs text-error">
-							{mutation.error instanceof Error ? mutation.error.message : t("Save failed")}
-					</span>
-				)}
-					{savedAt && !mutation.isPending && !mutation.isError && <span className="text-xs text-success">{t("Saved.")}</span>}
-				{replacementError && !mutation.isPending && !mutation.isError && (
-					<span className="text-xs text-warning">Orchestrator restart failed: {replacementError}</span>
-				)}
-			</div>
+			{!isScratchProject && (
+				<SettingsSection title={t("Tracker intake")}>
+					<IntakeFields
+						variant="settings"
+						form={intakeForm}
+						onChange={patchIntake}
+						repoPreview={{ value: effectiveIntakeRepo }}
+					/>
+					<SaveChangesFooter
+						isPending={mutation.isPending}
+						validationError={validationError}
+						mutationError={mutation.isError ? mutation.error : null}
+						savedAt={savedAt}
+						replacementError={replacementError}
+					/>
+				</SettingsSection>
+			)}
 		</form>
 	);
 }
 
-function PermissionModeSelect({
-	id,
-	value,
-	onChange,
+function SaveChangesFooter({
+	isPending,
+	validationError,
+	mutationError,
+	savedAt,
+	replacementError,
 }: {
-	id: string;
-	value: string;
-	onChange: (value: string) => void;
+	isPending: boolean;
+	validationError: string | null;
+	mutationError: unknown;
+	savedAt: number | null;
+	replacementError: string | null;
 }) {
 	const { t } = useI18n();
 	return (
-		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-control-form w-full text-control">
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent>
-					<SelectItem value="__default__">{t("Project default")}</SelectItem>
-				{PERMISSION_MODE_OPTIONS.map((opt) => (
-					<SelectItem key={opt.value} value={opt.value}>
-							{t(opt.label)}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
+		<div className="flex flex-col items-start">
+			<button
+				type="submit"
+				className="settings-footer-button settings-footer-button-primary"
+				disabled={isPending}
+			>
+				{t(isPending ? "Saving..." : "Save changes")}
+			</button>
+			{validationError && (
+				<span className="inline-flex items-center gap-1.5 text-xs text-error">
+					<TriangleAlert className="size-3 shrink-0 text-error" aria-hidden="true" />
+					{validationError}
+				</span>
+			)}
+			{mutationError != null && (
+				<span className="text-xs text-error">
+					{mutationError instanceof Error ? mutationError.message : t("Save failed")}
+				</span>
+			)}
+			{savedAt && !isPending && !mutationError && <span className="text-xs text-success">{t("Saved.")}</span>}
+			{replacementError && !isPending && !mutationError && (
+				<span className="text-xs text-warning">{t("Orchestrator restart failed: {error}", { error: replacementError })}</span>
+			)}
+		</div>
 	);
 }
 
-function ReviewerSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+function SettingsInputRow({
+	icon,
+	label,
+	id,
+	value,
+	onChange,
+	placeholder,
+}: {
+	icon?: LucideIcon;
+	label: string;
+	id: string;
+	value: string;
+	onChange: (value: string) => void;
+	placeholder?: string;
+}) {
+	return (
+		<SettingsRow icon={icon} label={label}>
+			<input
+				id={id}
+				aria-label={label}
+				className="settings-inline-input"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={placeholder}
+			/>
+		</SettingsRow>
+	);
+}
+
+function SettingsValueRow({
+	icon,
+	label,
+	value,
+}: {
+	icon?: LucideIcon;
+	label: string;
+	value: string;
+}) {
+	return (
+		<SettingsRow icon={icon} label={label}>
+			<span className="settings-row-value" title={value}>
+				{value}
+			</span>
+		</SettingsRow>
+	);
+}
+
+function PermissionModeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
 	const { t } = useI18n();
+	const options = [
+		{ value: "__default__", label: t("Project default") },
+		...PERMISSION_MODE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.label) })),
+	];
+
 	return (
-		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-control-form w-full text-control">
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent>
-					<SelectItem value="__default__">{t("Project default")}</SelectItem>
-				{REVIEWER_OPTIONS.map((reviewer) => (
-					<SelectItem key={reviewer} value={reviewer}>
-						{reviewer}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
+		<SettingsOptionMenu
+			aria-label={t("Permission mode")}
+			value={value || "__default__"}
+			options={options}
+			onChange={(v) => onChange(v === "__default__" ? "" : v)}
+		/>
 	);
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
+const REVIEWER_AGENT_PRIORITY = ["claude-code", "codex", "cursor", "opencode", "aider"] as const;
+const REVIEWER_AGENT_PRIORITY_RANK = new Map<string, number>(
+	REVIEWER_AGENT_PRIORITY.map((agent, index) => [agent, index]),
+);
+
+function ReviewerSelect({
+	value,
+	onChange,
+	disabled = false,
+	authorized,
+	installed,
+	supported,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	disabled?: boolean;
+	authorized?: components["schemas"]["AgentInfo"][];
+	installed?: components["schemas"]["AgentInfo"][];
+	supported?: components["schemas"]["AgentInfo"][];
+}) {
+	const { t } = useI18n();
+	const fallbackAgents: components["schemas"]["AgentInfo"][] = [...KNOWN_REVIEWER_HARNESS_IDS].map((id) => ({
+		id,
+		label: id,
+	}));
+	const filteredSupported = (supported ?? fallbackAgents).filter((a) => KNOWN_REVIEWER_HARNESS_IDS.has(a.id));
+	const supportedAgents = filteredSupported.length > 0 ? filteredSupported : fallbackAgents;
+	const options = buildRankedAgentOptions({
+		supported: supportedAgents,
+		installed,
+		authorized,
+		priorityRank: REVIEWER_AGENT_PRIORITY_RANK,
+		fallbackAgents,
+	});
+
+	const menuOptions = [
+		{ value: "__default__", label: t("Project default") },
+		...options.map((agent) => ({ value: agent.id, label: agent.label, disabled: agent.disabled })),
+	];
+	const selectedValue = value || "__default__";
+
 	return (
-		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
-				{label}
-			</Label>
-			{children}
-		</div>
+		<SettingsOptionMenu
+			aria-label={t("Default reviewer agent")}
+			value={selectedValue}
+			options={menuOptions}
+			disabled={disabled}
+			menuClassName="settings-agent-menu-surface"
+			menuItemClassName="settings-agent-menu-item"
+			onChange={(v) => onChange(v === "__default__" ? "" : v)}
+			renderTrigger={(selected) => (
+				<>
+					{selected && selected.value !== "__default__" ? (
+						<AgentAvatar provider={selected.value} className="size-icon-lg" />
+					) : null}
+					<span className="min-w-0 truncate">{selected?.label ?? t("Project default")}</span>
+				</>
+			)}
+			renderMenuItem={(option, selected) => {
+				if (option.value === "__default__") {
+					return <AgentSelectMenuItem label={option.label} selected={selected} />;
+				}
+				const agent = options.find((entry) => entry.id === option.value);
+				if (!agent) return option.label;
+				return (
+					<AgentSelectMenuItem
+						agentId={agent.id}
+						label={agent.label}
+						selected={selected}
+						status={agent.status}
+						statusTone={agent.statusTone}
+						disabled={agent.disabled}
+					/>
+				);
+			}}
+		/>
 	);
 }
 
-function ReadonlyRow({ label, value }: { label: string; value: string }) {
-	return (
-		<div className="flex items-center gap-3">
-			<span className="w-12 shrink-0 text-passive">{label}</span>
-			<span className="min-w-0 flex-1 truncate text-foreground">{value}</span>
-		</div>
-	);
+function projectKindLabel(kind: string): string {
+	switch (kind) {
+		case "single_repo":
+			return "single repo";
+		case "workspace":
+			return "workspace";
+		case "scratch":
+			return "scratch";
+		default:
+			return kind || "unknown";
+	}
 }
 
-function CenteredNote({ children }: { children: React.ReactNode }) {
-	return (
-		<div className="grid h-full place-items-center bg-background p-6 text-center text-xs text-passive">{children}</div>
-	);
+function scratchSupportedConfig(config: ProjectConfig): ProjectConfig {
+	const { defaultBranch: _defaultBranch, reviewers: _reviewers, trackerIntake: _trackerIntake, ...supported } = config;
+	return supported;
 }
 
-// Drop an object whose every value is undefined so we send `undefined` (omit)
-// rather than an empty {} the daemon would persist.
 function blankToUndefined<T extends object>(obj: T): T | undefined {
 	return Object.values(obj).some((v) => v !== undefined) ? obj : undefined;
 }

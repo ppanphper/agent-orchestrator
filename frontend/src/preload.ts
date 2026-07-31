@@ -1,10 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import {
-	KEYBOARD_SHORTCUTS_HELP_CHANNEL,
-	NEW_SESSION_SHORTCUT_CHANNEL,
-	NEW_SHELL_TERMINAL_SHORTCUT_CHANNEL,
-} from "./shared/shortcuts";
-import type { BrowserNavState, BrowserRect } from "./main/browser-view-host";
+import { FOCUS_TERMINAL_SHORTCUT_CHANNEL, KEYBOARD_SHORTCUTS_HELP_CHANNEL, NEXT_SESSION_SHORTCUT_CHANNEL, NEW_SESSION_SHORTCUT_CHANNEL, NEW_SHELL_TERMINAL_SHORTCUT_CHANNEL, OPEN_SETTINGS_SHORTCUT_CHANNEL, PREVIOUS_SESSION_SHORTCUT_CHANNEL, type KeybindingOverrides } from "./shared/shortcuts";
+import type {
+	BrowserAgentActivityState,
+	BrowserNavState,
+	BrowserRect,
+	BrowserTabsState,
+} from "./main/browser-view-host";
 import type { DaemonStatus } from "./shared/daemon-status";
 import type { TelemetryBootstrap } from "./shared/telemetry";
 import type { MigrationState } from "./main/app-state";
@@ -45,6 +46,7 @@ export type ImportRepoScan = {
 export type ImportFolderScan = {
 	path: string;
 	repos: ImportRepoScan[];
+	setupWarning?: string;
 };
 
 const api = {
@@ -54,6 +56,8 @@ const api = {
 		openExternal: (url: string) => ipcRenderer.invoke("app:openExternal", url) as Promise<void>,
 		scanImportFolder: (input: { path: string; mode: ImportFolderMode }) =>
 			ipcRenderer.invoke("app:scanImportFolder", input) as Promise<ImportFolderScan>,
+		checkAncestorRepo: (path: string) =>
+			ipcRenderer.invoke("app:checkAncestorRepo", path) as Promise<string | undefined>,
 		// Fired by the main process when the app-level new-session shortcut
 		// (⌘N / Ctrl+Shift+N) is pressed in any web contents.
 		onNewSessionShortcut: (listener: () => void) => {
@@ -70,13 +74,41 @@ const api = {
 				ipcRenderer.off(KEYBOARD_SHORTCUTS_HELP_CHANNEL, wrapped);
 			};
 		},
-		// Fired by the main process when Ctrl+` is pressed in any web contents,
+		// Fired by the main process when Ctrl+Shift+` is pressed in any web contents,
 		// including while focus is inside a terminal pane.
 		onNewShellTerminalShortcut: (listener: () => void) => {
 			const wrapped = () => listener();
 			ipcRenderer.on(NEW_SHELL_TERMINAL_SHORTCUT_CHANNEL, wrapped);
 			return () => {
 				ipcRenderer.off(NEW_SHELL_TERMINAL_SHORTCUT_CHANNEL, wrapped);
+			};
+		},
+		onOpenSettingsShortcut: (listener: () => void) => {
+			const wrapped = () => listener();
+			ipcRenderer.on(OPEN_SETTINGS_SHORTCUT_CHANNEL, wrapped);
+			return () => {
+				ipcRenderer.off(OPEN_SETTINGS_SHORTCUT_CHANNEL, wrapped);
+			};
+		},
+		onPreviousSessionShortcut: (listener: () => void) => {
+			const wrapped = () => listener();
+			ipcRenderer.on(PREVIOUS_SESSION_SHORTCUT_CHANNEL, wrapped);
+			return () => {
+				ipcRenderer.off(PREVIOUS_SESSION_SHORTCUT_CHANNEL, wrapped);
+			};
+		},
+		onNextSessionShortcut: (listener: () => void) => {
+			const wrapped = () => listener();
+			ipcRenderer.on(NEXT_SESSION_SHORTCUT_CHANNEL, wrapped);
+			return () => {
+				ipcRenderer.off(NEXT_SESSION_SHORTCUT_CHANNEL, wrapped);
+			};
+		},
+		onFocusTerminalShortcut: (listener: () => void) => {
+			const wrapped = () => listener();
+			ipcRenderer.on(FOCUS_TERMINAL_SHORTCUT_CHANNEL, wrapped);
+			return () => {
+				ipcRenderer.off(FOCUS_TERMINAL_SHORTCUT_CHANNEL, wrapped);
 			};
 		},
 	},
@@ -87,6 +119,14 @@ const api = {
 	window: {
 		setOverlay: (overlay: { color: string; symbolColor: string }) =>
 			ipcRenderer.invoke("window:setOverlay", overlay) as Promise<void>,
+		isFullScreen: () => ipcRenderer.invoke("window:isFullScreen") as Promise<boolean>,
+		onFullScreen: (listener: (fullScreen: boolean) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, fullScreen: boolean) => listener(fullScreen);
+			ipcRenderer.on("window:fullscreen", wrapped);
+			return () => {
+				ipcRenderer.off("window:fullscreen", wrapped);
+			};
+		},
 	},
 	theme: {
 		// Propagate the app's theme preference to Electron's nativeTheme so embedded
@@ -106,6 +146,7 @@ const api = {
 		getStatus: () => ipcRenderer.invoke("daemon:getStatus") as Promise<DaemonStatus>,
 		start: () => ipcRenderer.invoke("daemon:start") as Promise<DaemonStatus>,
 		stop: () => ipcRenderer.invoke("daemon:stop") as Promise<DaemonStatus>,
+		restart: () => ipcRenderer.invoke("daemon:restart") as Promise<DaemonStatus>,
 		onStatus: (listener: (status: DaemonStatus) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, status: DaemonStatus) => listener(status);
 			ipcRenderer.on("daemon:status", wrapped);
@@ -129,6 +170,11 @@ const api = {
 		goForward: (viewId: string) => ipcRenderer.invoke("browser:goForward", viewId) as Promise<BrowserNavState>,
 		reload: (viewId: string) => ipcRenderer.invoke("browser:reload", viewId) as Promise<BrowserNavState>,
 		stop: (viewId: string) => ipcRenderer.invoke("browser:stop", viewId) as Promise<BrowserNavState>,
+		getTabs: (viewId: string) => ipcRenderer.invoke("browser:getTabs", viewId) as Promise<BrowserTabsState>,
+		selectTab: (input: { viewId: string; tabId: string }) =>
+			ipcRenderer.invoke("browser:selectTab", input) as Promise<BrowserTabsState>,
+		closeTab: (input: { viewId: string; tabId: string }) =>
+			ipcRenderer.invoke("browser:closeTab", input) as Promise<BrowserTabsState>,
 		destroy: (viewId: string) => ipcRenderer.send("browser:destroy", viewId),
 		setAnnotationMode: (input: BrowserAnnotationModeInput) =>
 			ipcRenderer.invoke("browser:annotation:setMode", input) as Promise<void>,
@@ -137,6 +183,20 @@ const api = {
 			ipcRenderer.on("browser:navState", wrapped);
 			return () => {
 				ipcRenderer.off("browser:navState", wrapped);
+			};
+		},
+		onTabsState: (listener: (state: BrowserTabsState) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, state: BrowserTabsState) => listener(state);
+			ipcRenderer.on("browser:tabsState", wrapped);
+			return () => {
+				ipcRenderer.off("browser:tabsState", wrapped);
+			};
+		},
+		onAgentActivity: (listener: (state: BrowserAgentActivityState) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, state: BrowserAgentActivityState) => listener(state);
+			ipcRenderer.on("browser:agentActivity", wrapped);
+			return () => {
+				ipcRenderer.off("browser:agentActivity", wrapped);
 			};
 		},
 		onAnnotationSubmit: (listener: (payload: BrowserAnnotationSubmitPayload) => void) => {
@@ -174,9 +234,16 @@ const api = {
 		get: () => ipcRenderer.invoke("updateSettings:get") as Promise<UpdateSettings>,
 		set: (settings: UpdateSettings) => ipcRenderer.invoke("updateSettings:set", settings) as Promise<void>,
 	},
+	keybindings: {
+		get: () => ipcRenderer.invoke("keybindings:get") as Promise<KeybindingOverrides>,
+		set: (overrides: KeybindingOverrides) =>
+			ipcRenderer.invoke("keybindings:set", overrides) as Promise<KeybindingOverrides>,
+		setRecording: (active: boolean) => ipcRenderer.invoke("keybindings:setRecording", active) as Promise<void>,
+	},
 	updates: {
 		getStatus: () => ipcRenderer.invoke("updates:getStatus") as Promise<UpdateStatus>,
 		check: (options?: UpdateCheckOptions) => ipcRenderer.invoke("updates:check", options) as Promise<void>,
+		returnHome: (requestId?: string) => ipcRenderer.invoke("updates:returnHome", requestId) as Promise<void>,
 		download: (requestId?: string) => ipcRenderer.invoke("updates:download", requestId) as Promise<void>,
 		install: () => ipcRenderer.invoke("updates:install") as Promise<void>,
 		onStatus: (listener: (status: UpdateStatus) => void) => {

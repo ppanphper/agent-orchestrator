@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/browserruntime"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -23,9 +26,11 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
+	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
 	"github.com/aoagents/agent-orchestrator/backend/internal/push"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
+	browsersvc "github.com/aoagents/agent-orchestrator/backend/internal/service/browser"
 	devimportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/devimport"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
@@ -42,8 +47,29 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		cfg.StartupWorkingDirectory = cwd
+	}
+	if err := stabilizeWorkingDirectory(cfg.DataDir); err != nil {
+		return err
+	}
 
 	log := newLogger()
+	browserRuntimeToken := strings.TrimSpace(os.Getenv(browserruntime.RuntimeTokenEnv))
+	if browserRuntimeToken == "" {
+		browserRuntimeToken, err = browserruntime.NewToken()
+		if err != nil {
+			return err
+		}
+		if err := os.Setenv(browserruntime.RuntimeTokenEnv, browserRuntimeToken); err != nil {
+			return fmt.Errorf("set browser runtime token: %w", err)
+		}
+	}
+	browserAuthority, err := browsersvc.LoadAuthority(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("load browser capability authority: %w", err)
+	}
+	browserBroker := browserruntime.New(log, browserRuntimeToken)
 
 	// Fail fast only if a daemon is genuinely still serving the recorded port.
 	// CheckStale confirms the run-file's PID is alive, but that alone is not
@@ -103,6 +129,7 @@ func Run() error {
 	// is handed to httpd, which mounts it at /mux. Raw PTY bytes never flow
 	// through the CDC change_log -- only session-state events do.
 	runtimeAdapter := runtimeselect.New(log)
+	managedPreview := previewserver.New(log, cfg.DataDir)
 	termMgr := terminal.NewManager(runtimeAdapter, cdcPipe.Broadcaster, log)
 	defer termMgr.Close()
 
@@ -134,13 +161,12 @@ func Run() error {
 	}
 
 	lcStack := startLifecycle(ctx, store, runtimeAdapter, messenger, notificationWriter, telemetrySink, agents, log)
-	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
 
 	// Wire the controller-facing session service over the same store + LCM, the
-	// selected runtime, a gitworktree workspace, the per-session agent resolver
-	// (AO_AGENT validated here for compatibility), and the agent messenger, then mount it
-	// on the API.
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, agents, log)
+	// selected runtime, routed git/scratch workspaces, the per-session agent
+	// resolver (AO_AGENT validated here for compatibility), and the agent
+	// messenger, then mount it on the API.
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, runtimeAdapter, store, lcStack.LCM, lcStack.reengagement, messenger, telemetrySink, agents, managedPreview, browserBroker, browserAuthority, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -149,7 +175,19 @@ func Run() error {
 		}
 		return fmt.Errorf("wire session service: %w", err)
 	}
+	lcStack.LCM.SetCompletionTerminator(sessMgr)
+	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, log)
+	projectSvc := projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink})
+	if err := seedScratchProjectOnBoot(ctx, cfg, projectSvc); err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return err
+	}
 	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, log)
+
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -168,14 +206,17 @@ func Run() error {
 		DefaultPort: mobilebridge.DefaultPort,
 	}
 	mc := &controllers.MobileController{Bridge: bs}
-
-	projectSvc := projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink})
+	browserService := browsersvc.New(sessionSvc, browserBroker, browserAuthority)
 
 	// Standalone shell terminals: user-opened shells with no agent session
 	// behind them. They reuse the same runtime adapter (and therefore the same
 	// terminal mux) as session panes, but keep their own ids, storage, and
 	// lifetime — see internal/service/shellterm.
-	shellTermSvc := startShellTerminals(ctx, cfg, runtimeAdapter, store, projectSvc, log)
+	shellTermSvc := startShellTerminals(ctx, cfg, runtimeAdapter, store, projectSvc, sessionSvc, log)
+	// Late-bound so Kill/Cleanup close a session's scoped shells before its
+	// worktree is torn down (shellTermSvc cannot exist before sessMgr does; see
+	// SetShellTerminalCloser).
+	sessMgr.SetShellTerminalCloser(shellTermSvc)
 	// Push-device registry: persisted phones that receive OS push notifications.
 	// A load failure must not block boot — degrade to no push rather than refusing
 	// to start the daemon. pushRegistry (interface) is assigned only when load
@@ -224,6 +265,9 @@ func Run() error {
 				return sqlite.OpenReadOnly(ctx, dataDir)
 			},
 		}),
+		Browser:             browserService,
+		PreviewServer:       managedPreview,
+		SessionCapabilities: browserAuthority,
 	})
 	if err != nil {
 		stop()
@@ -234,6 +278,21 @@ func Run() error {
 		return err
 	}
 	previewDone := preview.NewPoller(store, sessionSvc, "http://"+srv.Addr().String(), preview.PollerConfig{Logger: log}).Start(ctx)
+	_ = os.Unsetenv(browserruntime.RuntimeAddressEnv)
+	if ln, addr, err := browserruntime.Listen(cfg.RunFilePath); err != nil {
+		log.Warn("browser runtime: listener unavailable; agent browser control disabled", "err", err)
+	} else {
+		if err := os.Setenv(browserruntime.RuntimeAddressEnv, addr); err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("publish browser runtime address: %w", err)
+		}
+		log.Info("browser runtime: listening", "addr", addr)
+		go func() {
+			if err := browserBroker.Serve(ctx, ln); err != nil {
+				log.Warn("browser runtime: serve stopped with error", "err", err)
+			}
+		}()
+	}
 
 	// Late-bind: the LAN listener shares the exact loopback router instance so
 	// the LAN surface and loopback surface never drift apart.
@@ -255,12 +314,9 @@ func Run() error {
 	if reconcileErr := sessMgr.Reconcile(ctx); reconcileErr != nil {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
-
-	// Redeliver any worker_idle events left pending across the restart, now that
-	// sessions (and their orchestrators) have been reconciled. Off the critical
-	// boot path (a store read plus a possible pane write per pending project);
-	// the recovery sweep is the backstop if it does not finish before shutdown.
-	go lcStack.LCM.DispatchAllPendingWorkerIdleEvents(ctx)
+	if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
+		log.Error("reconcile agent processes on boot failed", "err", reconcileErr)
+	}
 
 	// ponytail: 5s tolerates a brief frontend restart; tune if dev hot-reload trips it.
 	const supervisorGrace = 5 * time.Second
@@ -292,6 +348,7 @@ func Run() error {
 	// via defer) avoids the LIFO trap where a Stop() that blocks on ctx-cancel
 	// runs before the cancel: a non-signal exit path would hang otherwise.
 	stop()
+	managedPreview.Close()
 	<-previewDone
 	lcStack.Stop()
 	lanStopCtx, lanCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
@@ -305,8 +362,31 @@ func Run() error {
 	return runErr
 }
 
+func seedScratchProjectOnBoot(ctx context.Context, cfg config.Config, projects *projectsvc.Service) error {
+	if projects == nil {
+		return nil
+	}
+	if _, err := projects.EnsureDefaultScratchProject(ctx, filepath.Join(cfg.DataDir, "scratch", "default")); err != nil {
+		return fmt.Errorf("seed scratch project: %w", err)
+	}
+	return nil
+}
+
 // newLogger returns the daemon's slog logger. It writes to stderr so supervisors
 // can capture it separately from any structured stdout protocol added later.
 func newLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+func stabilizeWorkingDirectory(dataDir string) error {
+	if dataDir == "" {
+		return fmt.Errorf("daemon working directory: data dir is required")
+	}
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return fmt.Errorf("daemon working directory: create %s: %w", dataDir, err)
+	}
+	if err := os.Chdir(dataDir); err != nil {
+		return fmt.Errorf("daemon working directory: chdir %s: %w", dataDir, err)
+	}
+	return nil
 }
