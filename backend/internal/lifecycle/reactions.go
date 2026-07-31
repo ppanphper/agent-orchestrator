@@ -56,7 +56,7 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 	if err != nil || !ok {
 		return ReviewDeliveryNoop, err
 	}
-	if rec.IsTerminated || rec.Activity.State.NeedsInput() {
+	if cannotNudge(rec) {
 		return ReviewDeliveryNoop, nil
 	}
 	if m.guard == nil {
@@ -94,7 +94,7 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 		return ReviewDeliveryNoop, err
 	}
 	if outcome == sendOnceSuppressed {
-		// The worker went terminated/needs-input between the entry guard and the
+		// The worker went terminated/exited/needs-input between the entry guard and the
 		// paste: nothing reached it, so do NOT let the caller stamp the run
 		// delivered — it must re-fire once the session is workable again.
 		return ReviewDeliveryNoop, nil
@@ -149,12 +149,19 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// PR row before calling lifecycle, so the store already reflects this
 	// transition when sessionComplete reads it.
 	if o.Merged || o.Closed {
+		rec, ok, err := m.store.GetSession(ctx, id)
+		if err != nil || !ok {
+			return err
+		}
+		if rec.IsTerminated || !rec.TerminateOnPRMerge {
+			return nil
+		}
 		done, err := m.sessionComplete(ctx, id)
 		if err != nil {
 			return err
 		}
 		if done {
-			return m.MarkTerminated(ctx, id)
+			return m.terminateCompletedSession(ctx, id)
 		}
 		return nil
 	}
@@ -162,7 +169,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	if err != nil || !ok {
 		return err
 	}
-	if rec.IsTerminated || rec.Activity.State.NeedsInput() {
+	if cannotNudge(rec) {
 		return nil
 	}
 	// A single PR can trip several actionable conditions at once (failing CI,
@@ -203,6 +210,14 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		}
 		nudges = append(nudges, pendingNudge{key: "review:" + o.URL, sig: sig, msg: msg, maxAttempts: reviewMaxNudge})
 	}
+	// Only the merge-conflict nudge needs a store read (the parent-stack check).
+	// A read error there must NOT discard the CI/review nudges already queued
+	// above — returning early here would re-introduce the "one condition
+	// suppresses the others" coupling this queue was built to remove. So on error
+	// we skip only the merge-conflict nudge (it self-heals on the next poll) and
+	// defer the error past the send loop, still surfacing it so the observer logs
+	// and re-polls.
+	var blockedCheckErr error
 	if o.Mergeability == domain.MergeConflicting {
 		// Only the bottom of a stack is eligible for the rebase nudge. A PR
 		// stacked on an open parent is expected to report conflicts against its
@@ -210,10 +225,10 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		// agent to rebase it now would be noise. Mergeability UNKNOWN (the brief
 		// post-retarget recompute window) never reaches here.
 		blocked, err := m.prBlockedByOpenParent(ctx, id, o.URL)
-		if err != nil {
-			return err
-		}
-		if !blocked {
+		switch {
+		case err != nil:
+			blockedCheckErr = err
+		case !blocked:
 			msg := "There are merge conflicts on " + ident + ". Rebase onto the base branch and resolve them."
 			if o.URL != "" {
 				msg += "\nPR: " + domain.SanitizeControlChars(o.URL)
@@ -226,6 +241,21 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if _, err := m.sendOnce(ctx, id, o.URL, n.key, n.sig, n.msg, n.maxAttempts); err != nil {
 			return err
 		}
+	}
+	// Surface a deferred parent-stack read error only after the independent
+	// CI/review nudges have been sent, so none of them are lost to it.
+	return blockedCheckErr
+}
+
+func (m *Manager) terminateCompletedSession(ctx context.Context, id domain.SessionID) error {
+	m.mu.Lock()
+	terminator := m.completionTerminator
+	m.mu.Unlock()
+	if terminator == nil {
+		return fmt.Errorf("terminate completed session %s: session terminator is not configured", id)
+	}
+	if _, err := terminator.Kill(ctx, id); err != nil {
+		return fmt.Errorf("terminate completed session %s: %w", id, err)
 	}
 	return nil
 }
@@ -241,7 +271,7 @@ func (m *Manager) ApplyReviewResult(ctx context.Context, workerID domain.Session
 	if err != nil || !ok {
 		return ReviewDeliveryNoop, err
 	}
-	if rec.IsTerminated || rec.Activity.State.NeedsInput() {
+	if cannotNudge(rec) {
 		return ReviewDeliveryNoop, nil
 	}
 	if m.guard == nil {
@@ -263,7 +293,7 @@ func (m *Manager) ApplyReviewResult(ctx context.Context, workerID domain.Session
 		return ReviewDeliveryNoop, err
 	}
 	if outcome == sendOnceSuppressed {
-		// Suppressed by the just-in-time guard (worker went terminated/needs-
+		// Suppressed by the just-in-time guard (worker went terminated/exited/needs-
 		// input): the review feedback did not reach the worker, so leave the run
 		// undelivered to re-fire on the next observation.
 		return ReviewDeliveryNoop, nil
@@ -503,7 +533,7 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 	if err != nil || !ok {
 		return err
 	}
-	if rec.IsTerminated || rec.Activity.State.NeedsInput() {
+	if cannotNudge(rec) {
 		return nil
 	}
 	if o.Changed.Assignee {
@@ -526,6 +556,13 @@ func (m *Manager) ApplyTrackerFacts(ctx context.Context, id domain.SessionID, o 
 		}
 	}
 	return nil
+}
+
+// cannotNudge is the lifecycle entry guard for automated pane delivery. The
+// just-in-time sessionguard remains authoritative, but refusing exited agents
+// here avoids repeated dedup/store work for a pane that now contains a shell.
+func cannotNudge(rec domain.SessionRecord) bool {
+	return rec.IsTerminated || rec.Activity.State.NeedsInput() || rec.Activity.State == domain.ActivityExited
 }
 
 func isTerminalTrackerState(state domain.NormalizedIssueState) bool {
@@ -763,7 +800,7 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 	// The guard re-reads the session immediately before pasting: the caller's
 	// NeedsInput() entry check ran before this function's dedup/persist I/O, so
 	// a permission hook could have stored blocked (or the session could have
-	// terminated) in the meantime. A suppressed write returns SUPPRESSED (not
+	// exited/terminated) in the meantime. A suppressed write returns SUPPRESSED (not
 	// accounted), so a review caller won't stamp it delivered and it re-fires
 	// once the session is workable again. A store failure inside the guard also
 	// suppresses (fail closed, nothing was written); a messenger failure means

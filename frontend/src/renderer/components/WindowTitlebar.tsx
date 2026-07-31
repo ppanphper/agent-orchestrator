@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
+import { PanelLeft } from "lucide-react";
 import { useEffect, useState } from "react";
-import aoLogo from "../assets/ao-logo.png";
-import { useUiStore } from "../stores/ui-store";
+import { useResolvedTheme, useUiStore } from "../stores/ui-store";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -10,6 +10,7 @@ import {
 	DropdownMenuShortcut,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { useI18n } from "../lib/i18n";
 
 // Windows-only: macOS keeps its system menu bar and inset traffic lights; Linux
 // keeps the existing minimal chrome. Only Windows loses the native title bar and
@@ -66,17 +67,25 @@ function TopMenu({
 	);
 }
 
-export function WindowTitlebar() {
+export function WindowTitlebar({
+	onSidebarPreviewEnter,
+}: {
+	onSidebarPreviewEnter?: React.PointerEventHandler<HTMLButtonElement>;
+}) {
+	const { t } = useI18n();
 	const navigate = useNavigate();
-	const theme = useUiStore((state) => state.theme);
+	const theme = useResolvedTheme();
+	const { isSidebarOpen, toggleSidebar } = useUiStore();
 	const [openMenu, setOpenMenu] = useState<MenuKey | null>(null);
 
 	// Electron draws the min/max/close overlay natively and can't read our CSS, so
 	// push theme-matched colours to it whenever the theme changes.
 	useEffect(() => {
 		if (!isWindows) return;
+		// Keep in sync with --color-bg-sidebar (tokens.css) — the titlebar paints
+		// that colour, so the native buttons must match it.
 		const overlay =
-			theme === "light" ? { color: "#ffffff", symbolColor: "#3f444c" } : { color: "#0f1014", symbolColor: "#c7ccd4" };
+			theme === "light" ? { color: "#fcfcfc", symbolColor: "#3f444c" } : { color: "#17181c", symbolColor: "#c7ccd4" };
 		void window.ao?.window?.setOverlay(overlay);
 	}, [theme]);
 
@@ -96,74 +105,90 @@ export function WindowTitlebar() {
 
 	return (
 		<header className="window-titlebar">
-			<img alt="" aria-hidden="true" className="window-titlebar__logo" draggable={false} src={aoLogo} />
-			<span className="window-titlebar__title">Agent Orchestrator</span>
+			{/* Sidebar collapse toggle — same ui-store path as the macOS TitlebarNav
+			    cluster, so it stays in sync with the SidebarProvider. The brand
+			    logo + name stay in the sidebar header instead of duplicating here. */}
+			<button
+				aria-label={t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")}
+				className="window-titlebar__toggle"
+				onClick={toggleSidebar}
+				onPointerEnter={onSidebarPreviewEnter}
+				title={`${t(isSidebarOpen ? "Collapse sidebar" : "Expand sidebar")} · Ctrl+B`}
+				type="button"
+			>
+				<PanelLeft aria-hidden="true" className="window-titlebar__toggle-icon" />
+			</button>
 			<nav className="window-titlebar__menus">
-				<TopMenu id="file" label="File" openMenu={openMenu} setOpenMenu={setOpenMenu}>
-					<DropdownMenuItem onSelect={() => void navigate({ to: "/settings" })}>Settings</DropdownMenuItem>
+				<TopMenu id="file" label={t("File")} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+					<DropdownMenuItem onSelect={() => void navigate({ to: "/settings" })}>{t("Settings")}</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem onSelect={act("app.quit")}>
-						Quit
+						{t("Quit")}
 						<DropdownMenuShortcut>Alt+F4</DropdownMenuShortcut>
 					</DropdownMenuItem>
 				</TopMenu>
 
-				<TopMenu id="edit" label="Edit" openMenu={openMenu} setOpenMenu={setOpenMenu}>
+				<TopMenu id="edit" label={t("Edit")} openMenu={openMenu} setOpenMenu={setOpenMenu}>
 					<DropdownMenuItem onSelect={act("edit.undo")}>
-						Undo
+						{t("Undo")}
 						<DropdownMenuShortcut>Ctrl+Z</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={act("edit.redo")}>
-						Redo
+						{t("Redo")}
 						<DropdownMenuShortcut>Ctrl+Y</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem onSelect={act("edit.cut")}>
-						Cut
+						{t("Cut")}
 						<DropdownMenuShortcut>Ctrl+X</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={act("edit.copy")}>
-						Copy
+						{t("Copy")}
 						<DropdownMenuShortcut>Ctrl+C</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={act("edit.paste")}>
-						Paste
+						{t("Paste")}
 						<DropdownMenuShortcut>Ctrl+V</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={act("edit.selectAll")}>
-						Select All
+						{t("Select All")}
 						<DropdownMenuShortcut>Ctrl+A</DropdownMenuShortcut>
 					</DropdownMenuItem>
 				</TopMenu>
 
-				<TopMenu id="view" label="View" openMenu={openMenu} setOpenMenu={setOpenMenu}>
+				<TopMenu id="view" label={t("View")} openMenu={openMenu} setOpenMenu={setOpenMenu}>
 					<DropdownMenuItem onSelect={act("view.reload")}>
-						Reload
+						{t("Reload")}
 						<DropdownMenuShortcut>Ctrl+R</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuItem onSelect={act("view.devtools")}>
-						Toggle DevTools
+						{t("Toggle DevTools")}
 						<DropdownMenuShortcut>Ctrl+Shift+I</DropdownMenuShortcut>
 					</DropdownMenuItem>
 					<DropdownMenuSeparator />
-					<DropdownMenuItem onSelect={act("view.zoomIn")}>Zoom In</DropdownMenuItem>
-					<DropdownMenuItem onSelect={act("view.zoomOut")}>Zoom Out</DropdownMenuItem>
-					<DropdownMenuItem onSelect={act("view.zoomReset")}>Reset Zoom</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("view.zoomIn")}>{t("Zoom In")}</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("view.zoomOut")}>{t("Zoom Out")}</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("view.zoomReset")}>{t("Reset Zoom")}</DropdownMenuItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuItem onSelect={act("view.fullscreen")}>
-						Toggle Full Screen
+						{t("Toggle Full Screen")}
 						<DropdownMenuShortcut>F11</DropdownMenuShortcut>
 					</DropdownMenuItem>
 				</TopMenu>
 
-				<TopMenu id="window" label="Window" openMenu={openMenu} setOpenMenu={setOpenMenu}>
-					<DropdownMenuItem onSelect={act("window.minimize")}>Minimize</DropdownMenuItem>
-					<DropdownMenuItem onSelect={act("window.maximize")}>Maximize / Restore</DropdownMenuItem>
-					<DropdownMenuItem onSelect={act("window.close")}>Close</DropdownMenuItem>
+				<TopMenu id="window" label={t("Window")} openMenu={openMenu} setOpenMenu={setOpenMenu}>
+					<DropdownMenuItem onSelect={act("window.minimize")}>{t("Minimize")}</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("window.maximize")}>{t("Maximize / Restore")}</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("window.close")}>{t("Close")}</DropdownMenuItem>
 				</TopMenu>
 
 				<TopMenu id="help" label="Help" openMenu={openMenu} setOpenMenu={setOpenMenu}>
-					<DropdownMenuItem onSelect={act("help.about")}>About Agent Orchestrator</DropdownMenuItem>
+					<DropdownMenuItem onSelect={act("help.shortcuts")}>
+						Keyboard shortcuts
+						<DropdownMenuShortcut>Ctrl+/</DropdownMenuShortcut>
+					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+					<DropdownMenuItem onSelect={act("help.about")}>{t("About Agent Orchestrator")}</DropdownMenuItem>
 				</TopMenu>
 			</nav>
 		</header>

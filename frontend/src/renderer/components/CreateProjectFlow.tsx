@@ -1,33 +1,44 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { CheckCircle2, ChevronRight, Folder, FolderPlus, X, XCircle } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import { aoBridge } from "../lib/bridge";
 import { cn } from "../lib/utils";
 import type { ProjectKind } from "../types/workspace";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { Button } from "./ui/button";
+import { useI18n } from "../lib/i18n";
 
 export type CreateProjectInput = { path: string; asWorkspace?: boolean } & CreateProjectAgentSelection;
 
 type CreateProjectFlowMode = ProjectKind | "choose";
 
 // Shared create-project flow (native folder picker -> agent sheet -> create).
-// Sidebar enables the import-type picker; first-run board CTAs keep the direct
-// single-repo picker while still using the same Git setup recovery path.
+// Sidebar opens the import-type picker as a dialog; the first-run board embeds
+// the same picker inline. Both still share the Git setup recovery path.
 export function CreateProjectFlow({
 	children,
+	embedded = false,
 	idleLabel = "New project",
 	mode = "single_repo",
 	onCreateProject,
 	onInitializeProject,
+	openSignal,
 }: {
-	children: (state: { choosePath: () => void; disabled: boolean; error: string | null; label: string }) => ReactNode;
+	children?: (state: { choosePath: () => void; disabled: boolean; error: string | null; label: string }) => ReactNode;
+	// When true, render the Workspace/Project chooser inline (start page) instead
+	// of behind a trigger + dialog. Folder validation + agent sheet stay modal.
+	embedded?: boolean;
 	idleLabel?: string;
 	mode?: CreateProjectFlowMode;
 	onCreateProject: (input: CreateProjectInput) => Promise<void>;
 	onInitializeProject: (path: string) => Promise<void>;
+	// Monotonic counter: each new value opens the flow programmatically (the ⌘N
+	// "no project in scope" fallback). Lets the shortcut reuse the sidebar's own
+	// create-project flow instead of a separate delegating component.
+	openSignal?: number;
 }) {
+	const { t } = useI18n();
 	const [error, setError] = useState<string | null>(null);
 	const [modePickerOpen, setModePickerOpen] = useState(false);
 	const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -38,6 +49,7 @@ export function CreateProjectFlow({
 	const [isCreating, setIsCreating] = useState(false);
 	const [isInitializing, setIsInitializing] = useState(false);
 	const [repositorySetup, setRepositorySetup] = useState<"NOT_A_GIT_REPO" | "PROJECT_UNBORN" | null>(null);
+	const [repositorySetupWarning, setRepositorySetupWarning] = useState<string | null>(null);
 
 	const hasModePicker = mode === "choose";
 	const isBusy = isChoosingPath || isCreating || isInitializing;
@@ -52,15 +64,35 @@ export function CreateProjectFlow({
 		setError(null);
 		setValidationScan(null);
 		setRepositorySetup(null);
+		setRepositorySetupWarning(null);
 		setSelectedKind(kind);
 		setIsChoosingPath(true);
 		try {
 			const path = await aoBridge.app.chooseDirectory(
-				kind === "workspace" ? "Choose a workspace folder" : "Choose a project repository",
+				t(kind === "workspace" ? "Choose a workspace folder" : "Choose a project repository"),
 			);
 			if (path && kind === "single_repo") {
-				const setupCode = await repositorySetupRequired(path);
-				setRepositorySetup(setupCode);
+				const preflight = await projectRepositoryPreflight(path);
+				if (preflight.blockingError) {
+					setError(preflight.blockingError);
+					setValidationScan(preflight.scan);
+					setModePickerOpen(false);
+					setFolderPickerOpen(true);
+					return;
+				}
+				setRepositorySetup(preflight.setupCode);
+				setRepositorySetupWarning(preflight.setupWarning);
+			}
+			if (path && kind === "workspace") {
+				try {
+					const warning = await aoBridge.app.checkAncestorRepo(path);
+					if (warning) {
+						setRepositorySetupWarning(warning);
+						setRepositorySetup("NOT_A_GIT_REPO");
+					}
+				} catch {
+					// Ancestor check failed — proceed without warning
+				}
 			}
 			if (path) {
 				setModePickerOpen(false);
@@ -68,7 +100,7 @@ export function CreateProjectFlow({
 				setFolderPickerOpen(false);
 			}
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Could not add project");
+			setError(err instanceof Error ? err.message : t("Could not add project"));
 		} finally {
 			setIsChoosingPath(false);
 		}
@@ -83,6 +115,14 @@ export function CreateProjectFlow({
 		void chooseDirectory(mode);
 	};
 
+	// Seed with the current value so we never open on mount; open when it changes.
+	const lastOpenSignal = useRef(openSignal);
+	useEffect(() => {
+		if (openSignal === undefined || openSignal === lastOpenSignal.current) return;
+		lastOpenSignal.current = openSignal;
+		startFlow();
+	}, [openSignal]);
+
 	const createProject = async (selection: CreateProjectAgentSelection) => {
 		if (!selectedPath) return;
 		setError(null);
@@ -93,6 +133,7 @@ export function CreateProjectFlow({
 				setIsInitializing(true);
 				await onInitializeProject(selectedPath);
 				setRepositorySetup(null);
+				setRepositorySetupWarning(null);
 				setIsInitializing(false);
 				setIsCreating(true);
 			}
@@ -100,7 +141,7 @@ export function CreateProjectFlow({
 			setSelectedPath(null);
 		} catch (err) {
 			const code = err instanceof Error && "code" in err ? (err.code as string | undefined) : undefined;
-			const message = err instanceof Error ? err.message : "Could not add project";
+			const message = err instanceof Error ? err.message : t("Could not add project");
 			if (selectedKind === "single_repo" && isRepositorySetupRecoveryCode(code)) setRepositorySetup(code);
 			setError(message);
 			if (hasModePicker) {
@@ -127,23 +168,34 @@ export function CreateProjectFlow({
 	};
 
 	const label = isChoosingPath
-		? "Opening..."
+		? t("Opening...")
 		: isInitializing
 			? hasModePicker
-				? "Initializing..."
-				: "Setting up..."
+				? t("Initializing...")
+				: t("Setting up...")
 			: isCreating
-				? "Creating..."
-				: idleLabel;
+				? t("Creating...")
+				: t(idleLabel);
 
 	return (
 		<>
-			{children({
-				choosePath: startFlow,
-				disabled: isBusy,
-				error,
-				label,
-			})}
+			{!embedded &&
+				children?.({
+					choosePath: startFlow,
+					disabled: isBusy,
+					error,
+					label,
+				})}
+			{hasModePicker && embedded && !modePickerOpen && (
+				<div className="flex w-full flex-col items-center gap-3">
+					<ImportModePicker disabled={isBusy} onSelect={openFolderStep} />
+					{error && !folderPickerOpen && selectedPath === null && (
+						<p className="text-caption leading-body text-error" role="status">
+							{error}
+						</p>
+					)}
+				</div>
+			)}
 			{hasModePicker && (
 				<>
 					<CreateProjectModeDialog
@@ -162,7 +214,9 @@ export function CreateProjectFlow({
 							setError(null);
 							setValidationScan(null);
 							setFolderPickerOpen(false);
-							window.requestAnimationFrame(() => setModePickerOpen(true));
+							if (!embedded) {
+								window.requestAnimationFrame(() => setModePickerOpen(true));
+							}
 						}}
 						onChooseFolder={() => void chooseDirectory(selectedKind)}
 						onOpenChange={(open) => {
@@ -194,6 +248,7 @@ export function CreateProjectFlow({
 				open={selectedPath !== null}
 				path={selectedPath}
 				repositorySetupNeeded={repositorySetup !== null}
+				repositorySetupWarning={repositorySetupWarning}
 			/>
 			{error && !hasModePicker && (
 				<span className="sr-only" role="status">
@@ -208,13 +263,38 @@ function isRepositorySetupRecoveryCode(code: string | undefined): code is "NOT_A
 	return code === "NOT_A_GIT_REPO" || code === "PROJECT_UNBORN";
 }
 
-async function repositorySetupRequired(path: string): Promise<"NOT_A_GIT_REPO" | "PROJECT_UNBORN" | null> {
+type RepositorySetupCode = "NOT_A_GIT_REPO" | "PROJECT_UNBORN";
+
+type ProjectRepositoryPreflight = {
+	blockingError: string | null;
+	scan: ImportFolderScan | null;
+	setupCode: RepositorySetupCode | null;
+	setupWarning: string | null;
+};
+
+async function projectRepositoryPreflight(path: string): Promise<ProjectRepositoryPreflight> {
 	try {
 		const scan = await aoBridge.app.scanImportFolder({ path, mode: "project" });
-		if (scan.repos.length === 0) return "NOT_A_GIT_REPO";
-		return scan.repos[0]?.reason === "Repository must have at least one commit." ? "PROJECT_UNBORN" : null;
+		const reason = scan.repos[0]?.reason ?? "";
+		if (reason.startsWith("Selected folder is inside AO's internal data directory.")) {
+			return {
+				blockingError: reason,
+				scan,
+				setupCode: null,
+				setupWarning: null,
+			};
+		}
+		if (scan.repos.length === 0) {
+			return { blockingError: null, scan, setupCode: "NOT_A_GIT_REPO", setupWarning: scan.setupWarning ?? null };
+		}
+		return {
+			blockingError: null,
+			scan,
+			setupCode: reason === "Repository must have at least one commit." ? "PROJECT_UNBORN" : null,
+			setupWarning: null,
+		};
 	} catch {
-		return null;
+		return { blockingError: null, scan: null, setupCode: null, setupWarning: null };
 	}
 }
 
@@ -239,45 +319,72 @@ function CreateProjectModeDialog({
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
-				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[min(720px,calc(100svh-24px))] w-[min(680px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in">
-					<div className="flex shrink-0 items-start justify-between gap-4 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-5">
-						<div className="min-w-0">
-							<Dialog.Title className="text-[18px] font-semibold text-foreground">
-								Import to Agent Orchestrator
-							</Dialog.Title>
-							<Dialog.Description className="mt-1 text-[13px] font-medium text-muted-foreground">
-								What are you importing?
-							</Dialog.Description>
-						</div>
-						<Dialog.Close asChild>
-							<button
-								type="button"
-								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-								aria-label="Close new project dialog"
-								disabled={disabled}
-							>
-								<X className="size-4" aria-hidden="true" />
-							</button>
-						</Dialog.Close>
-					</div>
-					<div className="grid min-h-0 gap-3 overflow-y-auto px-4 pb-4 sm:grid-cols-2 sm:px-6 sm:pb-6">
-						<ProjectModeButton
-							description="Several Git repos that live under one parent folder."
-							disabled={disabled}
-							kind="workspace"
-							onClick={() => onSelect("workspace")}
-						/>
-						<ProjectModeButton
-							description="A single Git repository — one codebase, tracked in one repo."
-							disabled={disabled}
-							kind="single_repo"
-							onClick={() => onSelect("single_repo")}
-						/>
-					</div>
+				<Dialog.Overlay className="dialog-overlay data-[state=open]:animate-overlay-in" />
+				<Dialog.Content className="fixed left-1/2 top-1/2 z-overlay w-[min(var(--size-import-modal-max),calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 border-0 bg-transparent p-0 shadow-none outline-none data-[state=open]:animate-modal-in">
+					<ImportModePicker disabled={disabled} onClose={() => onOpenChange(false)} onSelect={onSelect} dialog />
 				</Dialog.Content>
 			</Dialog.Portal>
 		</Dialog.Root>
+	);
+}
+
+/** Figma "Dialog - ModalContainer" — Workspace vs Project import chooser. */
+function ImportModePicker({
+	dialog = false,
+	disabled,
+	onClose,
+	onSelect,
+}: {
+	dialog?: boolean;
+	disabled: boolean;
+	onClose?: () => void;
+	onSelect: (kind: ProjectKind) => void;
+}) {
+	const { t } = useI18n();
+	return (
+		<div
+			className="relative isolate flex w-full max-w-(--size-import-modal-max) flex-col items-stretch gap-8 rounded-welcome-panel border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-modal)] p-8 shadow-[var(--shadow-import-modal)]"
+			role={dialog ? undefined : "group"}
+			aria-label={dialog ? undefined : t("Import to Agent Orchestrator")}
+		>
+			<div className={cn("relative z-[1] flex flex-col items-start gap-1", onClose && "pr-8")}>
+				{dialog ? (
+					<Dialog.Title className="import-title">{t("Import to Agent Orchestrator")}</Dialog.Title>
+				) : (
+					<h2 className="import-title">{t("Import to Agent Orchestrator")}</h2>
+				)}
+				{dialog ? (
+					<Dialog.Description className="import-description">{t("What are you importing?")}</Dialog.Description>
+				) : (
+					<p className="import-description">{t("What are you importing?")}</p>
+				)}
+			</div>
+			<div className="relative z-[2] flex flex-row items-stretch justify-center gap-6 self-stretch">
+				<ProjectModeButton
+					description="Several Git repos that live under one parent folder."
+					disabled={disabled}
+					kind="workspace"
+					onClick={() => onSelect("workspace")}
+				/>
+				<ProjectModeButton
+					description="A single Git repository - one codebase, tracked in one repo."
+					disabled={disabled}
+					kind="single_repo"
+					onClick={() => onSelect("single_repo")}
+				/>
+			</div>
+			{onClose && (
+				<button
+					type="button"
+					className="import-close-button"
+					aria-label={t("Close new project dialog")}
+					disabled={disabled}
+					onClick={onClose}
+				>
+					<X className="size-5" aria-hidden="true" strokeWidth={1.67} />
+				</button>
+			)}
+		</div>
 	);
 }
 
@@ -292,49 +399,62 @@ function ProjectModeButton({
 	kind: ProjectKind;
 	onClick: () => void;
 }) {
+	const { t } = useI18n();
 	const isWorkspace = kind === "workspace";
 	return (
 		<button
 			type="button"
-			aria-label={isWorkspace ? "Workspace" : "Project"}
-			className="flex min-h-[176px] w-full flex-col justify-end rounded-lg border border-border bg-card px-4 py-4 text-left transition-colors hover:bg-background focus-visible:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 sm:min-h-[220px] sm:px-5 sm:py-5"
+			aria-label={t(isWorkspace ? "Workspace" : "Project")}
+			className="flex min-h-(--size-import-mode-card-min) w-full flex-1 flex-col justify-start gap-6 self-stretch rounded-welcome-panel border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-card)] p-6 text-left transition-colors hover:bg-[var(--color-bg-import-card-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 sm:min-h-(--size-import-mode-card-min-sm)"
 			disabled={disabled}
 			onClick={onClick}
 		>
-			<span className="mb-3 flex min-h-[70px] w-full items-center justify-center sm:mb-4 sm:min-h-[92px]">
-				{isWorkspace ? (
-					<span className="mx-auto w-[min(210px,100%)] rounded-lg border border-dashed border-border px-3 py-3">
-						<span className="mx-auto mb-2 flex w-[min(160px,100%)] items-center gap-2 font-mono text-[11px] font-semibold text-muted-foreground">
-							<Folder className="size-3.5" aria-hidden="true" />
-							my-workspace/
-						</span>
-						{["web-app", "api-server", "shared-libs"].map((repo) => (
-							<span
-								key={repo}
-								className="mx-auto mb-1.5 flex w-[min(170px,100%)] items-center gap-2 rounded-md bg-background px-2.5 py-1.5 font-mono text-[12px] font-semibold text-foreground last:mb-0"
-							>
-								<span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
-								{repo}
+			<span className="flex w-full flex-col items-start">
+				<span
+					className={cn(
+						"flex h-(--size-import-mode-illustration) w-full justify-center",
+						isWorkspace ? "items-start" : "items-center",
+					)}
+				>
+					{isWorkspace ? (
+						<span className="flex h-(--size-import-mode-illustration) w-full max-w-[240px] flex-col items-start gap-3 rounded-lg border border-dashed border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-illustration)] p-4">
+							<span className="flex items-center gap-2 text-[14px] leading-5 text-[var(--color-text-import-muted)]">
+								<Folder className="size-[14px] shrink-0" aria-hidden="true" />
+								my-workspace/
 							</span>
-						))}
-					</span>
-				) : (
-					<span className="mx-auto max-w-full rounded-lg border border-border bg-background px-4 py-3 font-mono text-[12px] font-semibold text-foreground sm:px-5 sm:py-3.5 sm:text-[13px]">
-						<span className="mr-2 inline-block size-1.5 rounded-full bg-success" aria-hidden="true" />
-						web-app <span className="px-2 text-muted-foreground">·</span>
-						<span className="text-muted-foreground">main</span>
-					</span>
-				)}
+							<span className="flex w-full flex-col items-start gap-2">
+								{["web-app", "api-server", "shared-libs"].map((repo) => (
+									<span
+										key={repo}
+										className="flex w-full items-center rounded bg-[var(--color-bg-import-chip)] px-3 py-2"
+									>
+										<span className="mr-2 size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+										<span className="text-[12px] font-bold leading-4 text-[var(--color-text-import-title)]">
+											{repo}
+										</span>
+									</span>
+								))}
+							</span>
+						</span>
+					) : (
+						<span className="flex h-[50px] w-fit items-center rounded-lg border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-chip)] px-4 py-3">
+							<span className="mr-2 size-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+							<span className="text-[14px] font-bold leading-5 text-[var(--color-text-import-title)]">web-app</span>
+							<span className="px-1 text-[16px] leading-6 text-[var(--color-text-import-sep)]" aria-hidden="true">
+								·
+							</span>
+							<span className="text-[14px] font-normal leading-5 text-[var(--color-text-import-muted)]">main</span>
+						</span>
+					)}
+				</span>
 			</span>
-			<span className="block text-[15px] font-semibold text-foreground sm:text-[16px]">
-				{isWorkspace ? "Workspace" : "Project"}
-			</span>
-			<span className="mt-2 block text-[12px] leading-5 text-muted-foreground sm:min-h-[40px] sm:text-[13px]">
-				{description}
-			</span>
-			<span className="mt-3 font-mono text-[12px] font-semibold text-passive">
-				<span className="mr-2 text-passive">•</span>
-				{isWorkspace ? "Multiple repositories" : "One repository"}
+			<span className="mt-auto flex w-full flex-col items-start gap-2">
+				<span className="text-[16px] font-bold leading-6 text-[var(--color-text-import-title)]">
+					{t(isWorkspace ? "Workspace" : "Project")}
+				</span>
+				<span className="text-[14px] font-normal leading-[23px] text-[var(--color-text-import-muted)]">
+					{t(description)}
+				</span>
 			</span>
 		</button>
 	);
@@ -359,39 +479,46 @@ function CreateProjectFolderDialog({
 	open: boolean;
 	scan: ImportFolderScan | null;
 }) {
+	const { t } = useI18n();
 	const isWorkspace = kind === "workspace";
 	const failedRepos = scan?.repos.filter((repo) => repo.status === "error" || !repo.hasRemote) ?? [];
 	const hasScan = scan !== null;
+	const footerMessage =
+		failedRepos.length > 0
+			? `Resolve ${failedRepos.length} failed ${failedRepos.length === 1 ? "repository" : "repositories"} to continue`
+			: hasScan
+				? "Review the error above or choose a different folder"
+				: "Choose a different folder to try again";
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
-				<Dialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-overlay-in" />
-				<Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[min(640px,calc(100svh-24px))] w-[min(640px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl data-[state=open]:animate-modal-in">
-					<div className="flex shrink-0 items-start gap-3 border-b border-border px-4 py-4 sm:gap-4 sm:px-6 sm:py-5">
+				<Dialog.Overlay className="dialog-overlay data-[state=open]:animate-overlay-in" />
+				<Dialog.Content className="fixed left-1/2 top-1/2 z-overlay flex max-h-[min(var(--size-import-folder-dialog),calc(100svh-24px))] w-[min(var(--size-import-folder-dialog),calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-welcome-panel border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-modal)] p-0 text-[var(--color-text-import-title)] shadow-[var(--shadow-import-modal)] data-[state=open]:animate-modal-in">
+					<div className="flex shrink-0 items-start gap-3 border-b border-[var(--color-border-import-modal)] px-4 py-4 sm:gap-4 sm:px-6 sm:py-5">
 						<button
 							type="button"
-							className="grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-							aria-label="Back to import type"
+							className="grid size-8 shrink-0 place-items-center rounded-lg border border-[var(--color-border-import-modal)] text-[var(--color-text-import-muted)] transition hover:bg-[var(--color-bg-import-card-hover)] hover:text-[var(--color-text-import-title)] disabled:pointer-events-none disabled:opacity-50"
+							aria-label={t("Back to import type")}
 							disabled={disabled}
 							onClick={onBack}
 						>
 							<ChevronRight className="size-4 rotate-180" aria-hidden="true" />
 						</button>
 						<div className="min-w-0 flex-1">
-							<Dialog.Title className="text-[18px] font-semibold text-foreground">
-								{isWorkspace ? "Import workspace" : "Import project"}
+							<Dialog.Title className="text-[18px] font-semibold text-[var(--color-text-import-title)]">
+								{t(isWorkspace ? "Import workspace" : "Import project")}
 							</Dialog.Title>
-							<Dialog.Description className="mt-1 max-w-[520px] text-[13px] font-medium leading-5 text-muted-foreground">
+							<Dialog.Description className="mt-1 max-w-[520px] text-[13px] font-medium leading-5 text-[var(--color-text-import-muted)]">
 								{isWorkspace
-									? "Pick a folder that contains your Git repositories. Each repo inside it joins the workspace."
-									: "Import a single Git repository as one project."}
+									? t("Pick a folder that contains your Git repositories. Each repo inside it joins the workspace.")
+									: t("Import a single Git repository as one project.")}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
 							<button
 								type="button"
-								className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-surface hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-								aria-label="Close import dialog"
+								className="grid size-7 shrink-0 place-items-center rounded-md text-[var(--color-text-import-muted)] transition hover:bg-[var(--color-bg-import-card-hover)] hover:text-[var(--color-text-import-title)] disabled:pointer-events-none disabled:opacity-50"
+								aria-label={t("Close import dialog")}
 								disabled={disabled}
 							>
 								<X className="size-4" aria-hidden="true" />
@@ -401,18 +528,18 @@ function CreateProjectFolderDialog({
 					<div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
 						{hasScan ? (
 							<div className="space-y-4">
-								<div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3">
-									<Folder className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+								<div className="flex items-center gap-3 rounded-lg border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-card)] px-4 py-3">
+									<Folder className="size-5 shrink-0 text-[var(--color-text-import-muted)]" aria-hidden="true" />
 									<div className="min-w-0 flex-1">
-										<div className="truncate font-mono text-[14px] font-semibold text-foreground">
+										<div className="truncate font-mono text-[14px] font-semibold text-[var(--color-text-import-title)]">
 											{displayImportPath(scan.path)}
 										</div>
-										<div className="mt-0.5 text-[12px] text-muted-foreground">
-											{isWorkspace ? "Workspace root" : "Project folder"}
+										<div className="mt-0.5 text-[12px] text-[var(--color-text-import-muted)]">
+											{t(isWorkspace ? "Workspace root" : "Project folder")}
 										</div>
 									</div>
 									<Button type="button" variant="outline" disabled={disabled} onClick={onChooseFolder}>
-										Change
+										{t("Change")}
 									</Button>
 								</div>
 
@@ -436,31 +563,34 @@ function CreateProjectFolderDialog({
 								{scan.repos
 									.filter((repo) => repo.status !== "error" && repo.hasRemote)
 									.map((repo) => (
-										<div key={repo.path} className="rounded-lg border border-border bg-background">
+										<div
+											key={repo.path}
+											className="rounded-lg border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-card)]"
+										>
 											<ImportRepoRow repo={repo} />
 										</div>
 									))}
 
 								{scan.repos.length === 0 && (
-									<div className="rounded-lg border border-border bg-background px-4 py-4 text-[12px] text-muted-foreground">
-										No repositories detected in this folder.
+									<div className="rounded-lg border border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-card)] px-4 py-4 text-[12px] text-[var(--color-text-import-muted)]">
+										{t("No repositories detected in this folder.")}
 									</div>
 								)}
 							</div>
 						) : (
 							<button
 								type="button"
-								className="flex min-h-[132px] w-full flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background px-4 py-5 text-center transition-colors hover:bg-surface disabled:pointer-events-none disabled:opacity-50 sm:min-h-[160px] sm:px-5 sm:py-6"
+								className="flex min-h-[132px] w-full flex-col items-center justify-center rounded-lg border border-dashed border-[var(--color-border-import-modal)] bg-[var(--color-bg-import-card)] px-4 py-5 text-center transition-colors hover:bg-[var(--color-bg-import-card-hover)] disabled:pointer-events-none disabled:opacity-50 sm:min-h-[160px] sm:px-5 sm:py-6"
 								disabled={disabled}
 								onClick={onChooseFolder}
 							>
-								<span className="mb-4 grid size-11 place-items-center rounded-xl bg-card text-muted-foreground">
+								<span className="mb-4 grid size-11 place-items-center rounded-xl bg-[var(--color-bg-import-chip)] text-[var(--color-text-import-muted)]">
 									<FolderPlus className="size-5" aria-hidden="true" />
 								</span>
-								<span className="text-[15px] font-semibold text-foreground">
-									{isWorkspace ? "Choose a folder" : "Choose a project folder"}
+								<span className="text-[15px] font-semibold text-[var(--color-text-import-title)]">
+									{t(isWorkspace ? "Choose a folder" : "Choose a project folder")}
 								</span>
-								<span className="mt-2 max-w-full text-pretty text-[12px] text-muted-foreground sm:text-[13px]">
+								<span className="mt-2 max-w-full text-pretty text-[12px] text-[var(--color-text-import-muted)] sm:text-[13px]">
 									{isWorkspace
 										? "Opens your system file picker — pick the folder that holds your repos"
 										: "Opens your system file picker — select one repo folder"}
@@ -477,20 +607,11 @@ function CreateProjectFolderDialog({
 							</div>
 						)}
 					</div>
-					<div className="flex shrink-0 flex-col gap-3 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-						<p className="text-[12px] font-medium text-muted-foreground">
-							{hasScan && failedRepos.length > 0
-								? `Resolve ${failedRepos.length} failed ${failedRepos.length === 1 ? "repository" : "repositories"} to continue`
-								: isWorkspace
-									? "No repositories to import"
-									: "No project selected"}
-						</p>
+					<div className="flex shrink-0 flex-col gap-3 border-t border-[var(--color-border-import-modal)] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+						<p className="text-[12px] font-medium text-[var(--color-text-import-muted)]">{footerMessage}</p>
 						<div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
 							<Button type="button" variant="outline" disabled={disabled} onClick={() => onOpenChange(false)}>
-								Cancel
-							</Button>
-							<Button type="button" variant="primary" disabled>
-								{isWorkspace ? "Import workspace" : "Import project"}
+								{t("Cancel")}
 							</Button>
 						</div>
 					</div>
@@ -509,17 +630,12 @@ function ImportRepoRow({ failed = false, repo }: { failed?: boolean; repo: Impor
 				<CheckCircle2 className="size-5 shrink-0 text-success" aria-hidden="true" />
 			)}
 			<div className="min-w-0 flex-1">
-				<div className="truncate text-[14px] font-semibold text-foreground">{repo.name}</div>
-				<div className="mt-0.5 truncate font-mono text-[12px] text-muted-foreground">
+				<div className="truncate text-[14px] font-semibold text-[var(--color-text-import-title)]">{repo.name}</div>
+				<div className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-text-import-muted)]">
 					{displayImportPath(repo.path)}
 				</div>
 			</div>
-			<div
-				className={cn(
-					"hidden max-w-[260px] shrink-0 truncate text-right font-mono text-[12px] sm:block",
-					failed ? "text-muted-foreground" : "text-muted-foreground",
-				)}
-			>
+			<div className="hidden max-w-[260px] shrink-0 truncate text-right font-mono text-[12px] text-[var(--color-text-import-muted)] sm:block">
 				{failed ? (repo.reason ?? "Repository cannot be imported") : `${repo.branch} ${remoteDisplay(repo.remote)}`}
 			</div>
 		</div>

@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
 	ActivityIndicator,
+	Alert,
 	KeyboardAvoidingView,
 	Modal,
 	Platform,
@@ -17,14 +18,20 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { pingServer } from "../../lib/api";
 import { DEFAULT_CONFIG, loadConfig, saveConfig, type ServerConfig } from "../../lib/config";
+import { haptics } from "../../lib/haptics";
+import { getPushStatus, openNotificationSettings, registerForPush } from "../../lib/push";
+import { describePush, describeRegisterFailure, type PushStatus } from "../../lib/pushStatus";
 import { useApp } from "../../lib/store";
 import { theme } from "../../lib/theme";
+import { useTabScrollToTop } from "../../lib/useTabScrollToTop";
 import { Button, ConnectionPill, ScreenHeader } from "../../lib/ui";
 
 export default function SettingsScreen() {
 	const insets = useSafeAreaInsets();
 	const router = useRouter();
 	const { reloadConfig, projects, connection, setActiveProject } = useApp();
+
+	const scrollRef = useTabScrollToTop<ScrollView>();
 
 	// Tapping a project scopes the Kanban board to it and jumps to that tab.
 	const openProject = (id: string) => {
@@ -68,9 +75,11 @@ export default function SettingsScreen() {
 		try {
 			await saveConfig(target);
 			const count = await pingServer(target);
+			haptics.success();
 			setResult({ ok: true, msg: `Connected — ${count} session(s) found.` });
 			await reloadConfig();
 		} catch (e) {
+			haptics.error();
 			const msg = e instanceof Error ? e.message : "Could not reach server.";
 			setResult({ ok: false, msg });
 			// Wrong/missing password — reopen the prompt instead of leaving the
@@ -133,6 +142,7 @@ export default function SettingsScreen() {
 			<View style={{ height: insets.top }} />
 			<ScreenHeader title="Settings" right={<ConnectionPill status={connection} />} />
 			<ScrollView
+				ref={scrollRef}
 				style={styles.screen}
 				contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
 				keyboardShouldPersistTaps="handled"
@@ -232,6 +242,8 @@ export default function SettingsScreen() {
 						</Pressable>
 					))
 				)}
+
+				<NotificationsSection />
 			</ScrollView>
 
 			<Modal visible={pwPromptOpen} transparent animationType="fade" onRequestClose={() => setPwPromptOpen(false)}>
@@ -264,6 +276,69 @@ export default function SettingsScreen() {
 				</View>
 			</Modal>
 		</KeyboardAvoidingView>
+	);
+}
+
+// Settings section that surfaces push-notification status and the one action to
+// advance it: request permission, register, or (after a permanent denial) open
+// the OS settings. Closes the "denied on first try, no way back" gap.
+function NotificationsSection() {
+	const { config, connection } = useApp();
+	const [status, setStatus] = useState<PushStatus | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	const refresh = useCallback(() => {
+		getPushStatus()
+			.then(setStatus)
+			.catch(() => {});
+	}, []);
+
+	// Reload on focus and whenever the connection flips (registration happens on
+	// a successful connect, so the status can change without user action here).
+	useFocusEffect(useCallback(() => refresh(), [refresh]));
+	useEffect(() => refresh(), [connection, refresh]);
+
+	// Pass the config itself — describePush decides whether a server actually
+	// exists (non-empty host). Passing a caller-computed boolean is what shipped
+	// a Register button to unpaired testers.
+	const { label, hint, action, actionLabel } = describePush(status, config);
+
+	async function onAction() {
+		if (!status || !action) return;
+		setBusy(true);
+		try {
+			if (action === "open-settings") {
+				await openNotificationSettings();
+			} else if (config) {
+				// Requests permission if needed, then registers with the daemon.
+				const result = await registerForPush(config);
+				if (result.ok) {
+					haptics.success();
+				} else {
+					haptics.error();
+					const { title, message } = describeRegisterFailure(result.reason, Platform.OS, result.status);
+					Alert.alert(title, message);
+				}
+			}
+		} finally {
+			setBusy(false);
+			refresh();
+		}
+	}
+
+	return (
+		<>
+			<Text style={[styles.sectionTitle, { marginTop: 32 }]}>NOTIFICATIONS</Text>
+			<View style={styles.notifCard}>
+				<View style={{ flex: 1, marginRight: 12 }}>
+					<Text style={styles.toggleLabel}>{label}</Text>
+					{hint ? <Text style={styles.toggleHint}>{hint}</Text> : null}
+				</View>
+				{action && actionLabel ? (
+					<Button title={actionLabel} variant="ghost" loading={busy} onPress={onAction} />
+				) : null}
+			</View>
+		</>
 	);
 }
 
@@ -332,6 +407,15 @@ const styles = StyleSheet.create({
 	},
 	toggleLabel: { color: theme.textPrimary, fontSize: 14, fontWeight: "600" },
 	toggleHint: { color: theme.textTertiary, fontSize: 12, marginTop: 2, lineHeight: 16 },
+	notifCard: {
+		flexDirection: "row",
+		alignItems: "center",
+		padding: 14,
+		backgroundColor: theme.bgElevated,
+		borderRadius: 10,
+		borderWidth: 1,
+		borderColor: theme.borderSubtle,
+	},
 	projRow: {
 		flexDirection: "row",
 		alignItems: "center",

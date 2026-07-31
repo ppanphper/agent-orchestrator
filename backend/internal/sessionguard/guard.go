@@ -42,10 +42,17 @@ const (
 	// SuppressedTerminated means the session is terminated; its pane is gone
 	// or about to be reaped.
 	SuppressedTerminated
+	// SuppressedExited means the managed pane remains available but its agent
+	// process exited. The pane may now contain an interactive shell, so writing
+	// an agent prompt would execute it as shell input.
+	SuppressedExited
 	// SuppressedAwaitingUser means the session awaits the human — blocked on a
 	// permission decision (Deliver and Nudge), or waiting at the prompt for
 	// the next instruction (Nudge only).
 	SuppressedAwaitingUser
+	// SuppressedBusy means the session is mid-turn on a harness that cannot
+	// safely steer an active turn (NudgeCoordination only).
+	SuppressedBusy
 )
 
 // String names the outcome for logs.
@@ -57,8 +64,12 @@ func (o Outcome) String() string {
 		return "suppressed_not_found"
 	case SuppressedTerminated:
 		return "suppressed_terminated"
+	case SuppressedExited:
+		return "suppressed_exited"
 	case SuppressedAwaitingUser:
 		return "suppressed_awaiting_user"
+	case SuppressedBusy:
+		return "suppressed_busy"
 	default:
 		return "suppressed_unknown"
 	}
@@ -101,23 +112,42 @@ func (g *Guard) Send(ctx context.Context, id domain.SessionID, msg string) error
 }
 
 // Deliver writes a user-initiated message (or its Enter-only re-submit: an
-// empty msg) into the session. It refuses only when the session is blocked on
-// a pending decision — waiting_input does NOT suppress, because an agent
+// empty msg) into a live agent. Its activity-specific policy refuses when the
+// session is blocked on a pending decision — waiting_input does NOT suppress, because an agent
 // sitting at an idle prompt is exactly where a user message (or the Enter that
 // submits its unsent draft) belongs.
 func (g *Guard) Deliver(ctx context.Context, id domain.SessionID, msg string) (Outcome, error) {
-	return g.send(ctx, id, msg, func(state domain.ActivityState) bool {
-		return state == domain.ActivityBlocked
+	return g.send(ctx, id, msg, func(rec domain.SessionRecord) (Outcome, bool) {
+		return SuppressedAwaitingUser, rec.Activity.State == domain.ActivityBlocked
 	})
 }
 
-// Nudge writes an AO-initiated (unsolicited) message into the session. It
-// refuses whenever the session awaits the human in any form — blocked on a
+// Nudge writes an AO-initiated (unsolicited) message into a live agent. Its
+// activity-specific policy refuses whenever the session awaits the human — blocked on a
 // decision or waiting at the prompt — because an automated paste+Enter there
 // either answers a dialog or submits text the user never saw.
 func (g *Guard) Nudge(ctx context.Context, id domain.SessionID, msg string) (Outcome, error) {
-	return g.send(ctx, id, msg, func(state domain.ActivityState) bool {
-		return state.NeedsInput()
+	return g.send(ctx, id, msg, func(rec domain.SessionRecord) (Outcome, bool) {
+		return SuppressedAwaitingUser, rec.Activity.State.NeedsInput()
+	})
+}
+
+// NudgeCoordination writes an AO-initiated coordination message under the full
+// delivery policy, re-evaluated here — at the write boundary — rather than from
+// a caller's earlier snapshot. It refuses whenever the session awaits the human,
+// and additionally while it is mid-turn on a harness that cannot safely steer an
+// active turn. steersActiveTurn is the adapter-provided capability; a nil
+// predicate is treated as "cannot steer", so an unknown harness never takes an
+// unsolicited write during a live turn.
+func (g *Guard) NudgeCoordination(ctx context.Context, id domain.SessionID, msg string, steersActiveTurn func(domain.AgentHarness) bool) (Outcome, error) {
+	return g.send(ctx, id, msg, func(rec domain.SessionRecord) (Outcome, bool) {
+		if rec.Activity.State.NeedsInput() {
+			return SuppressedAwaitingUser, true
+		}
+		if rec.Activity.State == domain.ActivityActive {
+			return SuppressedBusy, steersActiveTurn == nil || !steersActiveTurn(rec.Harness)
+		}
+		return SuppressedUnknown, false
 	})
 }
 
@@ -127,7 +157,7 @@ func (g *Guard) Nudge(ctx context.Context, id domain.SessionID, msg string) (Out
 // appear mid-paste — but the just-in-time read is the strongest guarantee
 // available without scraping the terminal. Fail closed: a store error
 // suppresses the write rather than pressing Enter on an unknown state.
-func (g *Guard) send(ctx context.Context, id domain.SessionID, msg string, refuse func(domain.ActivityState) bool) (Outcome, error) {
+func (g *Guard) send(ctx context.Context, id domain.SessionID, msg string, refuse func(domain.SessionRecord) (Outcome, bool)) (Outcome, error) {
 	rec, ok, err := g.store.GetSession(ctx, id)
 	if err != nil {
 		return SuppressedUnknown, fmt.Errorf("guard %s: read session: %w", id, err)
@@ -136,18 +166,17 @@ func (g *Guard) send(ctx context.Context, id domain.SessionID, msg string, refus
 		g.logger.Info("sessionguard: write suppressed", "sessionID", id, "reason", "not_found")
 		return SuppressedNotFound, nil
 	}
-	// ActivityExited is refused alongside IsTerminated as defense-in-depth:
-	// every exited writer today also sets IsTerminated, but a pane whose agent
-	// exited execs an interactive shell, so a paste+Enter there would run the
-	// message as shell commands — the invariant must not depend on writer
-	// discipline alone.
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited {
+	if rec.IsTerminated {
 		g.logger.Info("sessionguard: write suppressed", "sessionID", id, "reason", "terminated")
 		return SuppressedTerminated, nil
 	}
-	if refuse(rec.Activity.State) {
-		g.logger.Info("sessionguard: write suppressed", "sessionID", id, "reason", "awaiting_user", "state", string(rec.Activity.State))
-		return SuppressedAwaitingUser, nil
+	if rec.Activity.State == domain.ActivityExited {
+		g.logger.Info("sessionguard: write suppressed", "sessionID", id, "reason", "agent_exited")
+		return SuppressedExited, nil
+	}
+	if outcome, deny := refuse(rec); deny {
+		g.logger.Info("sessionguard: write suppressed", "sessionID", id, "reason", outcome.String(), "state", string(rec.Activity.State))
+		return outcome, nil
 	}
 	if err := g.messenger.Send(ctx, id, msg); err != nil {
 		return Sent, fmt.Errorf("guard %s: send: %w", id, err)

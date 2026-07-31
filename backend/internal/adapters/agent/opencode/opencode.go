@@ -1,12 +1,15 @@
 // Package opencode implements the opencode (sst/opencode) agent adapter:
 // launching new TUI sessions, resuming sessions by native id, installing a
-// workspace-local activity plugin, and reading plugin-derived session info.
+// workspace-local activity plugin plus the using-ao skill, and reading
+// plugin-derived session info.
 //
 // opencode differs from Claude Code and Codex in two ways AO has to bridge:
 //   - It has no native command-hook config (no settings.local.json / hooks.json
 //     equivalent). Its only lifecycle-extensibility surface is a JS/TS plugin
 //     loaded from .opencode/plugins/, so GetAgentHooks installs an AO-owned
-//     plugin file (see hooks.go) instead of merging JSON.
+//     plugin file (see hooks.go) instead of merging JSON. The same install also
+//     materializes using-ao under .opencode/skills/ so opencode's skill tool
+//     can discover it (the data-dir skill path alone is invisible to opencode).
 //   - Its CLI exposes only one approval flag (--dangerously-skip-permissions)
 //     and no system-prompt flag, so AO injects standing instructions by writing
 //     an AO-owned per-session config and selecting the generated agent.
@@ -30,8 +33,10 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/agentbase"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/binaryutil"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/hookutil"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 
 	_ "modernc.org/sqlite" // register sqlite driver for opencode session metadata probes
 )
@@ -48,6 +53,11 @@ const (
 	// (same value), but GetRestoreCommand reads it directly, so the const stays.
 	opencodeAgentSessionIDMetadataKey = "agentSessionId"
 )
+
+var opencodeUnixPaths = []string{
+	"/usr/local/bin/opencode",
+	"/opt/homebrew/bin/opencode",
+}
 
 // Plugin is the opencode agent adapter. It is safe for concurrent use; the
 // binary path is resolved once and cached under binaryMu.
@@ -156,8 +166,9 @@ func (p *Plugin) SessionInfo(ctx context.Context, session ports.SessionRef) (por
 	return info, ok, nil
 }
 
-// AuthStatus checks whether opencode has at least one configured provider
-// credential.
+// AuthStatus checks whether opencode has a configured provider credential.
+// Missing credentials remain unknown because opencode can still run its public
+// free models without a provider login.
 func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) {
 	binary, err := p.opencodeBinary(ctx)
 	if err != nil {
@@ -171,13 +182,13 @@ func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) 
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(probeCtx, binary, "auth", "list").CombinedOutput()
+	out, err := aoprocess.CommandContext(probeCtx, binary, "auth", "list").CombinedOutput()
 	if probeCtx.Err() != nil {
 		return ports.AgentAuthStatusUnknown, probeCtx.Err()
 	}
 	text := strings.ToLower(string(out))
 	if strings.Contains(text, "0 credentials") {
-		return ports.AgentAuthStatusUnauthorized, nil
+		return ports.AgentAuthStatusUnknown, nil
 	}
 	if strings.Contains(text, "credential") && err == nil {
 		return ports.AgentAuthStatusAuthorized, nil
@@ -255,7 +266,7 @@ func opencodeAuthJSONStatus(path string) (ports.AgentAuthStatus, bool, error) {
 		return ports.AgentAuthStatusUnknown, false, err
 	}
 	if strings.TrimSpace(string(data)) == "" {
-		return ports.AgentAuthStatusUnauthorized, true, nil
+		return ports.AgentAuthStatusUnknown, true, nil
 	}
 
 	var entries map[string]json.RawMessage
@@ -263,7 +274,7 @@ func opencodeAuthJSONStatus(path string) (ports.AgentAuthStatus, bool, error) {
 		return ports.AgentAuthStatusUnknown, false, err
 	}
 	if len(entries) == 0 {
-		return ports.AgentAuthStatusUnauthorized, true, nil
+		return ports.AgentAuthStatusUnknown, true, nil
 	}
 	for key, value := range entries {
 		if strings.TrimSpace(key) == "" {
@@ -274,7 +285,7 @@ func opencodeAuthJSONStatus(path string) (ports.AgentAuthStatus, bool, error) {
 			return ports.AgentAuthStatusAuthorized, true, nil
 		}
 	}
-	return ports.AgentAuthStatusUnauthorized, true, nil
+	return ports.AgentAuthStatusUnknown, true, nil
 }
 
 func opencodeDBAuthStatus(ctx context.Context, path string) (ports.AgentAuthStatus, bool, error) {
@@ -305,7 +316,7 @@ func opencodeDBAuthStatus(ctx context.Context, path string) (ports.AgentAuthStat
 	if authorized {
 		return ports.AgentAuthStatusAuthorized, true, nil
 	}
-	return ports.AgentAuthStatusUnauthorized, true, nil
+	return ports.AgentAuthStatusUnknown, true, nil
 }
 
 func opencodeDBHasAuthorizedAccount(ctx context.Context, db *sql.DB) (authorized, known bool, err error) {
@@ -457,15 +468,19 @@ func ResolveOpenCodeBinary(ctx context.Context) (string, error) {
 		return path, nil
 	}
 
-	candidates := []string{
-		"/usr/local/bin/opencode",
-		"/opt/homebrew/bin/opencode",
-	}
+	candidates := append([]string(nil), opencodeUnixPaths...)
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
-			filepath.Join(home, ".opencode", "bin", "opencode"),
+			filepath.Join(home, ".npm-global", "bin", "opencode"),
 			filepath.Join(home, ".npm", "bin", "opencode"),
+			filepath.Join(home, ".local", "bin", "opencode"),
+			filepath.Join(home, ".opencode", "bin", "opencode"),
 		)
+		nodeManagerCandidates, err := binaryutil.UnixNodeManagerBinCandidates(ctx, home, "opencode")
+		if err != nil {
+			return "", err
+		}
+		candidates = append(candidates, nodeManagerCandidates...)
 	}
 
 	for _, candidate := range candidates {

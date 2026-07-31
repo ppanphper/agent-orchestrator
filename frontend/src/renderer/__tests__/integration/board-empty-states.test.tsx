@@ -6,8 +6,8 @@ import type { ReactNode } from "react";
 
 // Drives the real useWorkspaceQuery + SessionsBoard end to end for the two
 // first-run states, mocking only the HTTP client, the router, and the native
-// folder picker: an empty daemon shows the welcome (no column shells), a fresh
-// project shows the task invitation, and any session brings the columns back.
+// folder picker: an empty daemon shows the import chooser (no column shells), a
+// fresh project shows the task invitation, and any session brings the columns back.
 const { getMock, navigateMock, chooseDirectoryMock, spawnOrchestratorMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	navigateMock: vi.fn(),
@@ -36,7 +36,7 @@ import { SessionsBoard } from "../../components/SessionsBoard";
 import { ShellProvider, type ShellContextValue } from "../../lib/shell-context";
 import { useUiStore } from "../../stores/ui-store";
 
-type Project = { id: string; name: string; path: string };
+type Project = { id: string; name: string; path: string; orchestratorAgent?: string };
 type Session = Record<string, unknown>;
 
 function respondWith(projects: Project[], sessions: Session[]) {
@@ -47,7 +47,12 @@ function respondWith(projects: Project[], sessions: Session[]) {
 	});
 }
 
-const project: Project = { id: "proj-1", name: "my-app", path: "/repo/my-app" };
+const project: Project = {
+	id: "proj-1",
+	name: "my-app",
+	path: "/repo/my-app",
+	orchestratorAgent: "claude-code",
+};
 
 const workerSession: Session = {
 	id: "sess-1",
@@ -85,6 +90,7 @@ function renderBoard(ui: ReactNode) {
 	lastQueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	lastShell = {
 		daemonStatus: { state: "ready" } as ShellContextValue["daemonStatus"],
+		workspaceStartupState: "ready",
 		createProject: createProjectMock,
 		initializeProjectRepository: initializeProjectRepositoryMock,
 	};
@@ -110,26 +116,62 @@ beforeEach(() => {
 });
 
 describe("global board first launch", () => {
-	it("shows the welcome instead of empty columns when no projects exist", async () => {
+	it("shows the startup loader instead of import while the daemon is booting", async () => {
+		respondWith([], []);
+		lastQueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		lastShell = {
+			daemonStatus: { state: "starting" } as ShellContextValue["daemonStatus"],
+			workspaceStartupState: "loading",
+			createProject: createProjectMock,
+			initializeProjectRepository: initializeProjectRepositoryMock,
+		};
+		render(
+			<QueryClientProvider client={lastQueryClient}>
+				<ShellProvider value={lastShell}>
+					<SessionsBoard />
+				</ShellProvider>
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByTestId("daemon-startup-loader")).toHaveClass("ao-startup-screen");
+		expect(screen.getByRole("status", { name: "Agent Orchestrator is starting" })).toBeInTheDocument();
+		expect(screen.getByText("Agent Orchestrator")).toBeInTheDocument();
+		expect(screen.getByText("Starting local services")).toHaveAttribute("aria-hidden", "true");
+		expect(screen.queryByText("Import to Agent Orchestrator")).not.toBeInTheDocument();
+		expect(columnCount()).toBe(0);
+	});
+
+	it("shows the import chooser instead of empty columns when no projects exist", async () => {
 		respondWith([], []);
 		renderBoard(<SessionsBoard />);
 
-		expect(await screen.findByText("Welcome to Agent Orchestrator")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Add your first project" })).toBeInTheDocument();
-		// The CTA is present.
-		expect(screen.getByRole("button", { name: "Add your first project" })).toBeInTheDocument();
+		expect(await screen.findByText("Import to Agent Orchestrator")).toBeInTheDocument();
+		expect(screen.getByText("What are you importing?")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Project" })).toBeInTheDocument();
 		expect(columnCount()).toBe(0);
 		// The welcome carries its own orientation — no dangling "Board" header.
 		expect(screen.queryByText("Board")).not.toBeInTheDocument();
 	});
 
-	it("opens the native folder picker from the welcome CTA", async () => {
+	it("opens the native folder picker from the Project card", async () => {
 		respondWith([], []);
 		chooseDirectoryMock.mockResolvedValue(null);
 		renderBoard(<SessionsBoard />);
 
-		await userEvent.click(await screen.findByRole("button", { name: "Add your first project" }));
+		await userEvent.click(await screen.findByRole("button", { name: "Project" }));
 		expect(chooseDirectoryMock).toHaveBeenCalledTimes(1);
+		expect(chooseDirectoryMock).toHaveBeenCalledWith("Choose a project repository");
+	});
+
+	it("opens the native folder picker from the Workspace card", async () => {
+		respondWith([], []);
+		chooseDirectoryMock.mockResolvedValue(null);
+		renderBoard(<SessionsBoard />);
+
+		await userEvent.click(await screen.findByRole("button", { name: "Workspace" }));
+		expect(chooseDirectoryMock).toHaveBeenCalledTimes(1);
+		expect(chooseDirectoryMock).toHaveBeenCalledWith("Choose a workspace folder");
 	});
 
 	it("shows a visible error when the folder picker fails", async () => {
@@ -137,7 +179,7 @@ describe("global board first launch", () => {
 		chooseDirectoryMock.mockRejectedValue(new Error("dialog unavailable"));
 		renderBoard(<SessionsBoard />);
 
-		await userEvent.click(await screen.findByRole("button", { name: "Add your first project" }));
+		await userEvent.click(await screen.findByRole("button", { name: "Project" }));
 		const messages = await screen.findAllByText("dialog unavailable");
 		expect(messages.some((el) => !el.classList.contains("sr-only"))).toBe(true);
 	});
@@ -147,7 +189,29 @@ describe("global board first launch", () => {
 		renderBoard(<SessionsBoard />);
 
 		expect(await screen.findByText("fix the bug")).toBeInTheDocument();
-		expect(screen.queryByText("Welcome to Agent Orchestrator")).not.toBeInTheDocument();
+		expect(screen.queryByText("Import to Agent Orchestrator")).not.toBeInTheDocument();
+		expect(columnCount()).toBe(4);
+	});
+
+	it("keeps populated columns visible after the daemon reports a startup failure", async () => {
+		respondWith([project], [workerSession]);
+		lastQueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		lastShell = {
+			daemonStatus: { state: "stopped", code: "exited" } as ShellContextValue["daemonStatus"],
+			workspaceStartupState: "loading",
+			createProject: createProjectMock,
+			initializeProjectRepository: initializeProjectRepositoryMock,
+		};
+		render(
+			<QueryClientProvider client={lastQueryClient}>
+				<ShellProvider value={lastShell}>
+					<SessionsBoard />
+				</ShellProvider>
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByText("fix the bug")).toBeInTheDocument();
+		expect(screen.queryByTestId("daemon-startup-loader")).not.toBeInTheDocument();
 		expect(columnCount()).toBe(4);
 	});
 });
@@ -161,7 +225,7 @@ describe("project board with no sessions", () => {
 		// Board header + empty state each offer the pair; the orchestrator is primary in both.
 		expect(screen.getAllByRole("button", { name: "Spawn Orchestrator" }).length).toBeGreaterThan(0);
 		expect(screen.getAllByRole("button", { name: "New task" }).length).toBeGreaterThan(0);
-		expect(screen.queryByText("Welcome to Agent Orchestrator")).not.toBeInTheDocument();
+		expect(screen.queryByText("Import to Agent Orchestrator")).not.toBeInTheDocument();
 		expect(columnCount()).toBe(0);
 	});
 
@@ -175,6 +239,22 @@ describe("project board with no sessions", () => {
 		await userEvent.click(spawnButton);
 
 		expect(await screen.findByText(/branch is already checked out/)).toBeInTheDocument();
+	});
+
+	it("opens project settings instead of spawning when no orchestrator agent is configured", async () => {
+		const unconfiguredProject = { ...project, orchestratorAgent: undefined };
+		respondWith([unconfiguredProject], []);
+		renderBoard(<SessionsBoard projectId="proj-1" />);
+
+		await screen.findByText("No worker sessions yet");
+		const [spawnButton] = screen.getAllByRole("button", { name: "Spawn Orchestrator" });
+		await userEvent.click(spawnButton);
+
+		expect(navigateMock).toHaveBeenCalledWith({
+			to: "/projects/$projectId/settings",
+			params: { projectId: "proj-1" },
+		});
+		expect(spawnOrchestratorMock).not.toHaveBeenCalled();
 	});
 
 	it("shows the project creation startup error after navigating to the project board", async () => {

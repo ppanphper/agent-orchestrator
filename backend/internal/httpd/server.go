@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -46,7 +45,7 @@ func NewWithDeps(cfg config.Config, log *slog.Logger, termMgr *terminal.Manager,
 	log = loggerOrDefault(log)
 	ln, err := net.Listen("tcp", cfg.Addr())
 	if err != nil {
-		if !errors.Is(err, syscall.EADDRINUSE) {
+		if !isAddrInUse(err) {
 			return nil, fmt.Errorf("bind %s: %w", cfg.Addr(), err)
 		}
 		// Configured port is taken by a non-AO process: retry on an ephemeral port.
@@ -91,10 +90,12 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 // shutdown is complete.
 func (s *Server) Run(ctx context.Context) error {
 	info := runfile.Info{
-		PID:       os.Getpid(),
-		Port:      s.boundPort(),
-		StartedAt: time.Now().UTC(),
-		Owner:     os.Getenv("AO_OWNER"),
+		PID:                   os.Getpid(),
+		Port:                  s.boundPort(),
+		StartedAt:             time.Now().UTC(),
+		Owner:                 os.Getenv("AO_OWNER"),
+		BrowserRuntimeToken:   os.Getenv("AO_BROWSER_RUNTIME_TOKEN"),
+		BrowserRuntimeAddress: os.Getenv("AO_BROWSER_RUNTIME_ADDRESS"),
 	}
 	if err := runfile.Write(s.cfg.RunFilePath, info); err != nil {
 		_ = s.listen.Close()

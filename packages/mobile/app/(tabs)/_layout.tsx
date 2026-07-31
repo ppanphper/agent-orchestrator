@@ -1,14 +1,19 @@
 import { Feather } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { haptics } from "../../lib/haptics";
 import { theme } from "../../lib/theme";
 
 export default function TabsLayout() {
 	const insets = useSafeAreaInsets();
 	return (
 		<Tabs
+			screenListeners={{ tabPress: () => haptics.select() }}
 			screenOptions={{
 				headerShown: false,
+				// Slide the outgoing/incoming screen toward the tab you moved to,
+				// instead of swapping instantly.
+				animation: "shift",
 				tabBarActiveTintColor: theme.blue,
 				tabBarInactiveTintColor: theme.textTertiary,
 				tabBarStyle: {
@@ -34,17 +39,17 @@ export default function TabsLayout() {
 				}}
 			/>
 			<Tabs.Screen
-				name="prs"
-				options={{
-					title: "PRs",
-					tabBarIcon: ({ color, size }) => <Feather name="git-pull-request" size={size - 2} color={color} />,
-				}}
-			/>
-			<Tabs.Screen
 				name="orchestrator"
 				options={{
 					title: "Orchestrator",
 					tabBarIcon: ({ color, size }) => <Feather name="share-2" size={size - 2} color={color} />,
+				}}
+			/>
+			<Tabs.Screen
+				name="prs"
+				options={{
+					title: "PRs",
+					tabBarIcon: ({ color, size }) => <Feather name="git-pull-request" size={size - 2} color={color} />,
 				}}
 			/>
 			<Tabs.Screen

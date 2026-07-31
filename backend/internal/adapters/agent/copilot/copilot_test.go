@@ -190,15 +190,95 @@ func TestGetLaunchCommandSelectsSessionCustomAgent(t *testing.T) {
 	}
 }
 
-func TestGetConfigSpecHasNoCustomFieldsYet(t *testing.T) {
+func TestGetConfigSpecReportsModelField(t *testing.T) {
 	plugin := &Plugin{}
 
 	spec, err := plugin.GetConfigSpec(context.Background())
 	if err != nil {
+		t.Fatalf("GetConfigSpec: %v", err)
+	}
+
+	var found bool
+	for _, f := range spec.Fields {
+		if f.Key != "model" {
+			continue
+		}
+		found = true
+		if f.Type != ports.ConfigFieldString {
+			t.Errorf("model field Type = %v, want %v", f.Type, ports.ConfigFieldString)
+		}
+		if f.Description == "" {
+			t.Error("model field Description is empty")
+		}
+	}
+	if !found {
+		t.Fatalf("GetConfigSpec did not report a \"model\" field: %#v", spec.Fields)
+	}
+}
+
+func TestGetConfigSpecRespectsCanceledContext(t *testing.T) {
+	plugin := &Plugin{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := plugin.GetConfigSpec(ctx); err == nil {
+		t.Fatal("GetConfigSpec with canceled context: err = nil, want non-nil")
+	}
+}
+
+func TestGetLaunchCommandAppendsModelFlag(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "copilot"}
+
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		Config: ports.AgentConfig{Model: "claude-sonnet-4.5"},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(spec.Fields) != 0 {
-		t.Fatalf("unexpected config fields: %#v", spec.Fields)
+	want := []string{"copilot", "--model", "claude-sonnet-4.5"}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("cmd = %#v, want %#v", cmd, want)
+	}
+}
+
+func TestGetLaunchCommandOmitsBlankModel(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "copilot"}
+
+	cmd, err := plugin.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		Config: ports.AgentConfig{Model: "   "},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(cmd, "--model") {
+		t.Fatalf("command %#v unexpectedly contains --model for blank config", cmd)
+	}
+}
+
+// Restore path intentionally does not forward a configured model override —
+// see appendModelFlag's doc comment (issue #2895; --model + --resume
+// composition could not be verified — the test account's Copilot Free plan
+// only grants "auto" regardless of --model). This test locks that decision
+// in so a future "just mirror the launch path" edit doesn't silently wire
+// it without re-verifying.
+func TestGetRestoreCommandDoesNotForwardModelOverride(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "copilot"}
+
+	cmd, ok, err := plugin.GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		Config: ports.AgentConfig{Model: "claude-sonnet-4.5"},
+		Session: ports.SessionRef{
+			Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "uuid-123"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	want := []string{"copilot", "--resume", "uuid-123"}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("cmd = %#v, want %#v (model override must not be forwarded on restore)", cmd, want)
 	}
 }
 
@@ -239,6 +319,93 @@ func TestCopilotNativeBinaryForNpmLoader(t *testing.T) {
 	if got != want {
 		t.Fatalf("native binary = %q, want %q", got, want)
 	}
+}
+
+func TestResolveCopilotBinaryFallbacks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix fallback candidate shape")
+	}
+	oldUnixPaths := copilotUnixPaths
+	copilotUnixPaths = nil
+	t.Cleanup(func() { copilotUnixPaths = oldUnixPaths })
+
+	tests := []struct {
+		name string
+		seed func(t *testing.T, home string) string
+	}{
+		{
+			name: "npm global",
+			seed: func(t *testing.T, home string) string {
+				return writeExecutable(t, filepath.Join(home, ".npm-global", "bin", "copilot"))
+			},
+		},
+		{
+			name: "nvm",
+			seed: func(t *testing.T, home string) string {
+				return writeExecutable(t, filepath.Join(home, ".nvm", "versions", "node", "v22.23.1", "bin", "copilot"))
+			},
+		},
+		{
+			name: "npm loader resolves to native",
+			seed: func(t *testing.T, home string) string {
+				packageDir := filepath.Join(home, ".npm-global", "lib", "node_modules", "@github", "copilot")
+				binDir := filepath.Join(home, ".npm-global", "bin")
+				if err := os.MkdirAll(filepath.Join(packageDir, "node_modules", ".bin"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(binDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				loader := filepath.Join(packageDir, "npm-loader.js")
+				if err := os.WriteFile(loader, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				native := writeExecutable(t, filepath.Join(packageDir, "node_modules", ".bin", "copilot-"+runtime.GOOS+"-"+runtime.GOARCH))
+				link := filepath.Join(binDir, "copilot")
+				if err := os.Symlink(loader, link); err != nil {
+					t.Fatal(err)
+				}
+				return native
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("VOLTA_HOME", filepath.Join(home, ".volta"))
+			t.Setenv("FNM_DIR", "")
+			want := tt.seed(t, home)
+
+			got, err := ResolveCopilotBinary(context.Background())
+			if err != nil {
+				t.Fatalf("ResolveCopilotBinary: %v", err)
+			}
+			got, err = filepath.EvalSymlinks(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err = filepath.EvalSymlinks(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("ResolveCopilotBinary = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func writeExecutable(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestAuthStatusAuthorizedFromEnv(t *testing.T) {
@@ -565,6 +732,47 @@ func TestGetAgentHooksInstallsSessionCopilotAgent(t *testing.T) {
 	}
 	if !strings.Contains(string(exclude), "/.github/agents/ao-sess-1.agent.md\n") {
 		t.Fatalf("git exclude does not ignore custom agent:\n%s", exclude)
+	}
+}
+
+func TestGetAgentHooksIgnoresSessionCopilotAgentInLinkedWorktreeCommonExclude(t *testing.T) {
+	plugin := &Plugin{resolvedBinary: "copilot"}
+	dir := t.TempDir()
+	commonGitDir := filepath.Join(dir, "repo", ".git")
+	worktreeGitDir := filepath.Join(commonGitDir, "worktrees", "sess-1")
+	workspace := filepath.Join(dir, "worktree")
+	if err := os.MkdirAll(worktreeGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".git"), []byte("gitdir: "+worktreeGitDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ports.WorkspaceHookConfig{
+		DataDir:       t.TempDir(),
+		SessionID:     "sess-1",
+		SystemPrompt:  "orchestrator must spawn workers",
+		WorkspacePath: workspace,
+	}
+	if err := plugin.GetAgentHooks(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	exclude, err := os.ReadFile(filepath.Join(commonGitDir, "info", "exclude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(exclude), "/.github/agents/ao-sess-1.agent.md\n") {
+		t.Fatalf("common git exclude does not ignore custom agent:\n%s", exclude)
+	}
+	if _, err := os.Stat(filepath.Join(worktreeGitDir, "info", "exclude")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("worktree-local exclude exists or stat failed: %v", err)
 	}
 }
 

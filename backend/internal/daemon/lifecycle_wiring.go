@@ -12,10 +12,14 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/reviewer"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/gitworktree"
+	workspacerouter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/router"
+	scratchworkspace "github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/scratch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
+	activityobserver "github.com/aoagents/agent-orchestrator/backend/internal/observe/activity"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
+	"github.com/aoagents/agent-orchestrator/backend/internal/orchestratorloop"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
@@ -34,31 +38,85 @@ type lifecycleStack struct {
 	// LCM is the Lifecycle Manager (the canonical write path). It is exposed so
 	// startSession can share the same reducer the reaper drives, rather than
 	// standing up a second store+LCM pair that would diverge under writes.
-	LCM         *lifecycle.Manager
-	reaperDone  <-chan struct{}
-	scmDone     <-chan struct{}
-	trackerDone <-chan struct{}
+	LCM              *lifecycle.Manager
+	runtimeReaper    *reaper.Reaper
+	reaperDone       <-chan struct{}
+	activityDone     <-chan struct{}
+	scmDone          <-chan struct{}
+	trackerDone      <-chan struct{}
+	reengagementDone <-chan struct{}
+	reengagement     *orchestratorloop.Manager
 }
 
 // startLifecycle constructs the Lifecycle Manager over the store and starts the
 // reaper. The goroutine stops when ctx is cancelled; Stop waits for it to drain.
 // The messenger is the per-daemon agent messenger the LCM uses to nudge agents
 // in response to SCM observations (CI failure, review feedback, merge conflict).
-func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, logger *slog.Logger) *lifecycleStack {
-	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry))
+func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, agents ports.AgentResolver, logger *slog.Logger) *lifecycleStack {
+	steering := activeTurnSteering(agents)
+	reengagement := orchestratorloop.New(store, messenger, notifier, orchestratorloop.Config{
+		Logger:       logger,
+		SteersActive: steering,
+	})
+	lcm := lifecycle.New(store, messenger,
+		lifecycle.WithNotificationSink(notifier),
+		lifecycle.WithTelemetry(telemetry),
+		lifecycle.WithActiveSteering(steering),
+		lifecycle.WithOrchestratorReengagement(reengagement),
+	)
 	rp := reaper.New(lcm, store, runtime, reaper.Config{Logger: logger})
-	return &lifecycleStack{LCM: lcm, reaperDone: rp.Start(ctx)}
+	activityPoller := activityobserver.New(store, lcm, runtime, agents, activityobserver.Config{Logger: logger})
+	return &lifecycleStack{
+		LCM:              lcm,
+		runtimeReaper:    rp,
+		reaperDone:       rp.Start(ctx),
+		activityDone:     activityPoller.Start(ctx),
+		reengagement:     reengagement,
+		reengagementDone: reengagement.Start(ctx),
+	}
+}
+
+// ReconcileRuntime runs the same conservative runtime/workload observation as
+// the periodic reaper. The daemon calls it after session-manager reconciliation
+// so exits missed while AO was stopped are folded before the API starts serving.
+func (l *lifecycleStack) ReconcileRuntime(ctx context.Context) error {
+	return l.runtimeReaper.Tick(ctx)
+}
+
+// activeTurnSteering resolves the per-harness active-turn steering capability
+// from the agent adapters, so lifecycle policy consumes an adapter-declared
+// capability instead of knowing harness-specific terminal semantics. An
+// unresolvable harness, or one whose adapter does not declare the capability,
+// answers false.
+func activeTurnSteering(agents ports.AgentResolver) func(domain.AgentHarness) bool {
+	return func(harness domain.AgentHarness) bool {
+		if agents == nil {
+			return false
+		}
+		agent, ok := agents.Agent(harness)
+		if !ok {
+			return false
+		}
+		steerer, ok := agent.(ports.ActiveTurnSteerer)
+		return ok && steerer.SteersActiveTurn()
+	}
 }
 
 // Stop waits for the reaper goroutine to exit. The caller must cancel the ctx
 // passed to startLifecycle before calling Stop.
 func (l *lifecycleStack) Stop() {
 	<-l.reaperDone
+	if l.activityDone != nil {
+		<-l.activityDone
+	}
 	if l.scmDone != nil {
 		<-l.scmDone
 	}
 	if l.trackerDone != nil {
 		<-l.trackerDone
+	}
+	if l.reengagementDone != nil {
+		<-l.reengagementDone
 	}
 }
 
@@ -73,23 +131,21 @@ func (l *lifecycleStack) Stop() {
 type sessionLifecycle interface {
 	Reconcile(ctx context.Context) error
 	RestoreAll(ctx context.Context) error
+	Kill(ctx context.Context, id domain.SessionID) (bool, error)
+	// SetShellTerminalCloser late-binds Kill/Cleanup to close a session's
+	// scoped shell terminals before its worktree is torn down. shellterm.Service
+	// is built after Session Manager during boot (see startShellTerminals), so
+	// this cannot be a constructor argument.
+	SetShellTerminalCloser(closer sessionmanager.ShellTerminalCloser)
 }
 
 // startSession builds the controller-facing session service: a session manager
-// over the selected runtime, a per-session gitworktree workspace, the shared
-// store + LCM, the per-session agent resolver, and the agent messenger. The
-// returned service is mounted at httpd APIDeps.Sessions. It also returns the
-// manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
-	defaultAgent := cfg.Agent
-	if defaultAgent == "" {
-		defaultAgent = config.DefaultAgent
-	}
-	agents, err := buildAgentResolver(defaultAgent, log)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	ws, err := gitworktree.New(gitworktree.Options{
+// over the selected runtime, routed git/scratch workspaces, the shared store +
+// LCM, the per-session agent resolver, and the agent messenger. The returned
+// service is mounted at httpd APIDeps.Sessions. It also returns the manager so
+// the caller can wire Reconcile into the boot sequence.
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, reengagement *orchestratorloop.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, agents ports.AgentResolver, previewLifecycle sessionmanager.PreviewLifecycle, browserLifecycle sessionmanager.BrowserLifecycle, browserCapabilities sessionmanager.BrowserCapabilityIssuer, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
+	gitWS, err := gitworktree.New(gitworktree.Options{
 		// Per-session worktrees live under the data dir, so a single AO_DATA_DIR
 		// override moves all durable per-user state together.
 		ManagedRoot: filepath.Join(cfg.DataDir, "worktrees"),
@@ -101,31 +157,55 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("session workspace: %w", err)
 	}
+	scratchWS, err := scratchworkspace.New(scratchworkspace.Options{
+		ManagedRoot: filepath.Join(cfg.DataDir, "worktrees"),
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("scratch session workspace: %w", err)
+	}
+	ws := workspacerouter.New(workspacerouter.Deps{
+		Git:      gitWS,
+		Scratch:  scratchWS,
+		Projects: store,
+	})
 	mgr := sessionmanager.New(sessionmanager.Deps{
-		Runtime:   runtime,
-		Agents:    agents,
-		Workspace: ws,
-		Store:     store,
-		Messenger: messenger,
-		Lifecycle: lcm,
-		DataDir:   cfg.DataDir,
-		Logger:    log,
+		Runtime:             runtime,
+		Agents:              agents,
+		Workspace:           ws,
+		Store:               store,
+		Messenger:           messenger,
+		Lifecycle:           lcm,
+		Preview:             previewLifecycle,
+		Browser:             browserLifecycle,
+		BrowserCapabilities: browserCapabilities,
+		DataDir:             cfg.DataDir,
+		Logger:              log,
 	})
 	scmProvider, err := newGitHubSCMProvider(log)
 	if err != nil {
 		logSCMProviderDisabled(log, err)
 	}
-	tracker, err := newGitHubTracker()
-	if err != nil {
+	// Build the GitHub tracker, but keep a true nil ports.Tracker interface on
+	// failure. newGitHubTracker returns (*github.Tracker)(nil) on ErrNoToken,
+	// which Go wraps as a non-nil typed-nil interface — that slips past the
+	// `s.tracker == nil` guard in withIssueContext and dereferences nil on the
+	// first issue lookup (issue #2685). Assigning the concrete value only on
+	// success leaves tracker as a real interface-nil otherwise.
+	var tracker ports.Tracker
+	if t, err := newGitHubTracker(); err != nil {
 		logTrackerDisabled(log, err)
+	} else {
+		tracker = t
 	}
 	sessionSvc := sessionsvc.NewWithDeps(sessionsvc.Deps{
-		Manager:   mgr,
-		Store:     store,
-		PRClaimer: store,
-		SCM:       scmProvider,
-		Tracker:   tracker,
-		Telemetry: telemetry,
+		Manager:      mgr,
+		Store:        store,
+		PRClaimer:    store,
+		SCM:          scmProvider,
+		DataDir:      cfg.DataDir,
+		Tracker:      tracker,
+		Telemetry:    telemetry,
+		Reengagement: reengagement,
 		// no_signal only makes sense for harnesses whose adapters install
 		// activity hooks; the deriver registry is the source of truth for that.
 		SignalCapable: activitydispatch.SupportsHarness,
@@ -143,7 +223,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		Sessions: store,
 		PRs:      store,
 		Projects: store,
-		Launcher: reviewcore.NewLauncher(reviewers, runtime),
+		Launcher: reviewcore.NewLauncher(reviewers, runtime, cfg.DataDir),
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
 	return sessionSvc, reviewSvc, mgr, nil

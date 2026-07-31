@@ -3,11 +3,20 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getMock, putMock, postMock } = vi.hoisted(() => ({
+const { getMock, putMock, postMock, navigateMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
 	putMock: vi.fn(),
 	postMock: vi.fn(),
+	navigateMock: vi.fn(),
 }));
+
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@tanstack/react-router")>();
+	return {
+		...actual,
+		useNavigate: () => navigateMock,
+	};
+});
 
 vi.mock("../lib/api-client", () => ({
 	apiClient: {
@@ -48,7 +57,8 @@ function renderSettings(projectId = "proj-1", workspaces?: WorkspaceSummary[]) {
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
 	await userEvent.click(trigger);
-	await userEvent.click(await screen.findByRole("option", { name: optionName }));
+	const escaped = optionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	await userEvent.click(await screen.findByRole("menuitem", { name: new RegExp(escaped, "i") }));
 }
 
 const agentCatalogResponse = {
@@ -94,6 +104,7 @@ beforeEach(() => {
 	getMock.mockReset();
 	putMock.mockReset();
 	postMock.mockReset();
+	navigateMock.mockReset();
 	putMock.mockResolvedValue({ data: { project: {} }, error: undefined });
 	postMock.mockResolvedValue({
 		data: { orchestrator: { id: "proj-1-orch-2" } },
@@ -103,6 +114,78 @@ beforeEach(() => {
 });
 
 describe("ProjectSettingsForm", () => {
+	it("closes project settings with the close button", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		await userEvent.click(await screen.findByRole("button", { name: "Close settings" }));
+
+		expect(navigateMock).toHaveBeenCalledWith({ to: "/projects/$projectId", params: { projectId: "proj-1" } });
+	});
+
+	it("closes project settings with Escape", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+		await screen.findByLabelText("Settings");
+
+		await userEvent.keyboard("{Escape}");
+
+		expect(navigateMock).toHaveBeenCalledWith({ to: "/projects/$projectId", params: { projectId: "proj-1" } });
+	});
+
+	it("atomically saves the project display name and config without changing its stable ID", async () => {
+		mockProject({
+			id: "tg_content_factory_5863f66be3",
+			name: "tg_content_factory_5863f66be3",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings("tg_content_factory_5863f66be3");
+
+		const projectName = await screen.findByLabelText("Project name");
+		await userEvent.clear(projectName);
+		await userEvent.type(projectName, "TG Content Factory");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}", {
+			params: { path: { id: "tg_content_factory_5863f66be3" } },
+			body: expect.objectContaining({ displayName: "TG Content Factory" }),
+		});
+		expect(screen.getByText("tg_content_factory_5863f66be3")).toBeInTheDocument();
+	});
+
 	it("loads the current project settings and saves the exposed fields without dropping hidden config", async () => {
 		mockProject({
 			id: "proj-1",
@@ -137,10 +220,10 @@ describe("ProjectSettingsForm", () => {
 		expect(screen.getByLabelText("Session prefix")).toHaveValue("po");
 		expect(screen.getByLabelText("Model override")).toHaveValue("claude-opus-4-5");
 
-		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
-		const orchestratorAgent = screen.getByRole("combobox", { name: "Default orchestrator agent" });
-		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
-		const reviewerAgent = screen.getByRole("combobox", { name: "Default reviewer agent" });
+		const workerAgent = screen.getByRole("button", { name: "Default worker agent" });
+		const orchestratorAgent = screen.getByRole("button", { name: "Default orchestrator agent" });
+		const permissionMode = screen.getByRole("button", { name: "Permission mode" });
+		const reviewerAgent = screen.getByRole("button", { name: "Default reviewer agent" });
 		expect(workerAgent).toHaveTextContent("codex");
 		expect(orchestratorAgent).toHaveTextContent("claude-code");
 		expect(permissionMode).toHaveTextContent("Auto");
@@ -154,14 +237,16 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.type(screen.getByLabelText("Model override"), "gpt-5-codex");
 		await chooseOption(workerAgent, "OpenCode");
 		await chooseOption(orchestratorAgent, "Goose");
-		await chooseOption(permissionMode, "Bypass permissions");
+		await userEvent.click(permissionMode);
+		await userEvent.click(await screen.findByRole("menuitem", { name: "Bypass permissions" }));
 
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
-		expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}/config", {
+		expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}", {
 			params: { path: { id: "proj-1" } },
 			body: {
+				displayName: "Project One",
 				config: {
 					defaultBranch: "release",
 					sessionPrefix: "rel",
@@ -188,7 +273,7 @@ describe("ProjectSettingsForm", () => {
 		expect(await screen.findByText("Saved.")).toBeInTheDocument();
 	}, 20_000);
 
-	it("shows the daemon validation message when save fails", async () => {
+	it("shows the daemon validation message when the atomic settings save fails", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "Project One",
@@ -208,11 +293,39 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
+		const projectName = await screen.findByLabelText("Project name");
+		await userEvent.clear(projectName);
+		await userEvent.type(projectName, "Updated Project");
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
 		expect(await screen.findByText("invalid permissions")).toBeInTheDocument();
 		expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
 		expect(postMock).not.toHaveBeenCalled();
+	});
+
+	it("rejects a blank project name before sending the settings update", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+
+		const projectName = await screen.findByLabelText("Project name");
+		await userEvent.clear(projectName);
+		await userEvent.type(projectName, "   ");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		expect(await screen.findByText("Project name is required.")).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
 	});
 
 	it("requires worker and orchestrator agents for existing projects missing role config", async () => {
@@ -229,8 +342,8 @@ describe("ProjectSettingsForm", () => {
 		renderSettings();
 
 		expect(await screen.findByText("Worker and orchestrator agents are required.")).toBeInTheDocument();
-		expect(screen.getByRole("combobox", { name: "Default worker agent" })).toHaveTextContent("Select worker agent");
-		expect(screen.getByRole("combobox", { name: "Default orchestrator agent" })).toHaveTextContent(
+		expect(screen.getByRole("button", { name: "Default worker agent" })).toHaveTextContent("Select worker agent");
+		expect(screen.getByRole("button", { name: "Default orchestrator agent" })).toHaveTextContent(
 			"Select orchestrator agent",
 		);
 
@@ -238,6 +351,38 @@ describe("ProjectSettingsForm", () => {
 
 		expect(await screen.findAllByText("Worker and orchestrator agents are required.")).toHaveLength(2);
 		expect(putMock).not.toHaveBeenCalled();
+	});
+
+	it("disables agent selectors while the initial agent catalog is loading", async () => {
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents") {
+				return new Promise(() => {});
+			}
+			return {
+				data: {
+					status: "ok",
+					project: {
+						id: "proj-1",
+						name: "Project One",
+						kind: "single_repo",
+						path: "/repo/project-one",
+						repo: "",
+						defaultBranch: "main",
+						config: {
+							worker: { agent: "codex" },
+							orchestrator: { agent: "claude-code" },
+						},
+					},
+				},
+				error: undefined,
+			};
+		});
+
+		renderSettings();
+
+		expect(await screen.findByRole("button", { name: "Default worker agent" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Default orchestrator agent" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Default reviewer agent" })).toBeDisabled();
 	});
 
 	it("shows unknown-auth agents as selectable with a warning in project settings", async () => {
@@ -257,17 +402,77 @@ describe("ProjectSettingsForm", () => {
 		renderSettings();
 
 		await waitFor(() => expect(screen.getAllByText("/repo/project-one").length).toBeGreaterThan(0));
-		const workerAgent = screen.getByRole("combobox", { name: "Default worker agent" });
+		const workerAgent = screen.getByRole("button", { name: "Default worker agent" });
 		await userEvent.click(workerAgent);
-		const options = await screen.findAllByRole("option");
+		const options = await screen.findAllByRole("menuitem");
 		expect(options.map((option) => option.textContent)).toEqual([
 			"Claude Code",
 			"Codex",
-			"Goose",
 			"OpenCode",
+			"Goose",
 			"KiroAuth unknown",
 		]);
 		expect(options[4]).not.toHaveAttribute("aria-disabled", "true");
+	});
+
+	it("shows scratch identity and saves only scratch-supported settings", async () => {
+		mockProject({
+			id: "scratch",
+			name: "Scratch",
+			kind: "scratch",
+			path: "/home/me/.ao/scratch/default",
+			repo: "",
+			defaultBranch: "",
+			config: {
+				defaultBranch: "main",
+				sessionPrefix: "ao",
+				env: { FOO: "bar" },
+				symlinks: [".env"],
+				postCreate: ["npm install"],
+				agentRules: "keep work small",
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				agentConfig: {
+					model: "gpt-5-codex",
+					permissions: "auto",
+				},
+				reviewers: [{ harness: "codex" }],
+				trackerIntake: { enabled: true, provider: "github", assignee: "octocat" },
+			},
+		});
+
+		renderSettings("scratch");
+
+		const kindRow = (await screen.findByText("kind")).closest(".settings-row-bar");
+		expect(kindRow).toHaveTextContent("scratch");
+		expect(screen.queryByLabelText("Default branch")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Session prefix")).not.toBeInTheDocument();
+		expect(screen.queryByText("Reviewers")).not.toBeInTheDocument();
+		expect(screen.queryByText("Tracker intake")).not.toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}", {
+			params: { path: { id: "scratch" } },
+			body: {
+				displayName: "Scratch",
+				config: {
+					env: { FOO: "bar" },
+					sessionPrefix: "ao",
+					symlinks: [".env"],
+					postCreate: ["npm install"],
+					agentRules: "keep work small",
+					worker: { agent: "codex" },
+					orchestrator: { agent: "claude-code" },
+					agentConfig: {
+						model: "gpt-5-codex",
+						permissions: "auto",
+					},
+				},
+			},
+		});
+		expect(postMock).not.toHaveBeenCalled();
 	});
 
 	it("saves GitHub tracker intake settings, deriving the repo from the project's git origin", async () => {
@@ -386,7 +591,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		]);
 
-		const orchestratorAgent = await screen.findByRole("combobox", { name: "Default orchestrator agent" });
+		const orchestratorAgent = await screen.findByRole("button", { name: "Default orchestrator agent" });
 		expect(orchestratorAgent).toHaveTextContent("goose");
 
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -426,7 +631,7 @@ describe("ProjectSettingsForm", () => {
 		const queryClient = renderSettings();
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-		const orchestratorAgent = await screen.findByRole("combobox", { name: "Default orchestrator agent" });
+		const orchestratorAgent = await screen.findByRole("button", { name: "Default orchestrator agent" });
 		await chooseOption(orchestratorAgent, "goose");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 

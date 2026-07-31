@@ -24,11 +24,19 @@ type Info struct {
 	Port int `json:"port"`
 	// StartedAt is when the daemon came up (RFC 3339).
 	StartedAt time.Time `json:"startedAt"`
-	// Owner is "app" when the desktop Electron app spawned this daemon; empty
-	// for a headless `ao start` daemon. Used by the app to decide whether to
-	// hold a supervisor link on attach (app-owned: re-link; headless: skip so
-	// the daemon stays persistent across app quit).
+	// Owner records how this daemon was spawned, so the app can decide whether
+	// to hold a supervisor link on attach from the daemon's own durable record
+	// rather than the current process env. "app" = normal desktop-spawned daemon
+	// (re-link on attach); "persistent" = spawned under AO_KEEP_DAEMON, stays
+	// alive across app quit and is never re-linked; empty = headless `ao start`
+	// daemon, stays persistent across app quit.
 	Owner string `json:"owner,omitempty"`
+	// BrowserRuntimeToken authenticates the desktop-owned browser bridge. It is
+	// regenerated for every daemon launch.
+	BrowserRuntimeToken string `json:"browserRuntimeToken,omitempty"`
+	// BrowserRuntimeAddress is the exact Unix socket or Windows named-pipe
+	// address selected by the backend for this daemon launch.
+	BrowserRuntimeAddress string `json:"browserRuntimeAddress,omitempty"`
 }
 
 // Write atomically writes running.json at path, creating parent directories

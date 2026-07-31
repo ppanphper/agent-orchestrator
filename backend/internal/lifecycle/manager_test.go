@@ -18,6 +18,7 @@ type fakeStore struct {
 	prs        map[domain.SessionID][]domain.PullRequest
 	signatures map[string]string
 
+	listPRsErr        error
 	signatureWriteErr error
 	signatureWrites   int
 }
@@ -32,7 +33,20 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 }
 
 func (f *fakeStore) ListPRsBySession(_ context.Context, id domain.SessionID) ([]domain.PullRequest, error) {
+	if f.listPRsErr != nil {
+		return nil, f.listPRsErr
+	}
 	return f.prs[id], nil
+}
+
+func (f *fakeStore) ListSessions(_ context.Context, project domain.ProjectID) ([]domain.SessionRecord, error) {
+	var out []domain.SessionRecord
+	for _, rec := range f.sessions {
+		if rec.ProjectID == project {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) UpdateSession(_ context.Context, rec domain.SessionRecord) error {
@@ -58,7 +72,18 @@ func (f *fakeStore) UpdatePRLastNudgeSignature(_ context.Context, prURL, payload
 
 type fakeMessenger struct {
 	msgs []string
+	ids  []domain.SessionID
 	err  error
+}
+
+type fakeCompletionTerminator struct {
+	calls int
+	err   error
+}
+
+func (f *fakeCompletionTerminator) Kill(_ context.Context, _ domain.SessionID) (bool, error) {
+	f.calls++
+	return true, f.err
 }
 
 type telemetrySink struct {
@@ -71,11 +96,12 @@ func (s *telemetrySink) Emit(_ context.Context, ev ports.TelemetryEvent) {
 
 func (*telemetrySink) Close(context.Context) error { return nil }
 
-func (f *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) error {
+func (f *fakeMessenger) Send(_ context.Context, id domain.SessionID, msg string) error {
 	if f.err != nil {
 		return f.err
 	}
 	f.msgs = append(f.msgs, msg)
+	f.ids = append(f.ids, id)
 	return nil
 }
 
@@ -89,12 +115,12 @@ func working(id domain.SessionID) domain.SessionRecord {
 	return domain.SessionRecord{ID: id, ProjectID: "mer", Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()}}
 }
 
-func TestRuntimeObservation_InferredDeathSetsTerminated(t *testing.T) {
+func TestRuntimeObservation_ConfirmedRuntimeDeathTerminates(t *testing.T) {
 	m, st, _ := newManager()
 	rec := working("mer-1")
 	rec.Activity.LastActivityAt = time.Now().Add(-2 * time.Minute)
 	st.sessions["mer-1"] = rec
-	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Probe: ports.ProbeDead}); err != nil {
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Runtime: ports.ProbeDead, Workload: ports.ProbeFailed}); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
@@ -107,11 +133,59 @@ func TestRuntimeObservation_FailedProbeDoesNotMutate(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = working("mer-1")
 	before := st.sessions["mer-1"]
-	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Probe: ports.ProbeFailed}); err != nil {
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Runtime: ports.ProbeFailed, Workload: ports.ProbeFailed}); err != nil {
 		t.Fatal(err)
 	}
 	if st.sessions["mer-1"] != before {
 		t.Fatalf("failed probe should not persist a state, got %+v", st.sessions["mer-1"])
+	}
+}
+
+func TestRuntimeObservation_ExitedWorkloadKeepsSessionLive(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Metadata.RuntimeLaunchID = "launch-1"
+	st.sessions["mer-1"] = rec
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Runtime: ports.ProbeAlive, Workload: ports.ProbeDead, LaunchID: "launch-1"}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsTerminated || got.Activity.State != domain.ActivityExited {
+		t.Fatalf("want live/exited, got %+v", got)
+	}
+}
+
+func TestRuntimeObservation_AliveWorkloadCannotResurrectExitedSession(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	rec.Metadata.RuntimeLaunchID = "launch-1"
+	st.sessions["mer-1"] = rec
+	before := st.sessions["mer-1"]
+
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{
+		Runtime:  ports.ProbeAlive,
+		Workload: ports.ProbeAlive,
+		LaunchID: "launch-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions["mer-1"] != before {
+		t.Fatalf("original supervisor observation resurrected exited session: %+v", st.sessions["mer-1"])
+	}
+}
+
+func TestRuntimeObservation_StaleLaunchIsIgnored(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Metadata.RuntimeLaunchID = "launch-2"
+	st.sessions["mer-1"] = rec
+	before := st.sessions["mer-1"]
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Runtime: ports.ProbeAlive, Workload: ports.ProbeDead, LaunchID: "launch-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions["mer-1"] != before {
+		t.Fatalf("stale launch observation mutated session: %+v", st.sessions["mer-1"])
 	}
 }
 
@@ -127,12 +201,320 @@ func TestActivity_InvalidIsIgnored(t *testing.T) {
 	}
 }
 
+func TestActivity_MetadataOnlyStoresAgentSessionIDWithoutChangingActivity(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.FirstSignalAt = time.Now().Add(-time.Minute)
+	st.sessions["mer-1"] = rec
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{AgentSessionID: "native-session-1"}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.Metadata.AgentSessionID != "native-session-1" {
+		t.Fatalf("AgentSessionID = %q, want native-session-1", got.Metadata.AgentSessionID)
+	}
+	if got.Activity != rec.Activity {
+		t.Fatalf("metadata-only hook changed activity: got %+v, want %+v", got.Activity, rec.Activity)
+	}
+	if !got.FirstSignalAt.Equal(rec.FirstSignalAt) {
+		t.Fatalf("metadata-only hook changed FirstSignalAt: got %v, want %v", got.FirstSignalAt, rec.FirstSignalAt)
+	}
+}
+
+func TestActivity_SameStateSignalStillStoresAgentSessionID(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.FirstSignalAt = time.Now().Add(-time.Minute)
+	st.sessions["mer-1"] = rec
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+		Valid:          true,
+		State:          rec.Activity.State,
+		AgentSessionID: "native-session-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.Metadata.AgentSessionID != "native-session-1" {
+		t.Fatalf("AgentSessionID = %q, want native-session-1", got.Metadata.AgentSessionID)
+	}
+	if got.Activity != rec.Activity {
+		t.Fatalf("same-state metadata signal changed activity: got %+v, want %+v", got.Activity, rec.Activity)
+	}
+}
+
+func TestActivity_ReconciledIdleRequiresUnchangedActiveSnapshot(t *testing.T) {
+	m, st, _ := newManager()
+	updatedAt := time.Unix(100, 0).UTC()
+	rec := working("mer-1")
+	rec.Kind = domain.KindWorker
+	rec.FirstSignalAt = updatedAt
+	rec.UpdatedAt = updatedAt
+	st.sessions[rec.ID] = rec
+
+	if err := m.ApplyActivitySignal(ctx, rec.ID, ports.ActivitySignal{
+		Valid:             true,
+		State:             domain.ActivityIdle,
+		Event:             "terminal-idle",
+		ExpectedUpdatedAt: updatedAt.Add(-time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions[rec.ID].Activity.State; got != domain.ActivityActive {
+		t.Fatalf("stale reconciliation changed activity to %q", got)
+	}
+
+	if err := m.ApplyActivitySignal(ctx, rec.ID, ports.ActivitySignal{
+		Valid:             true,
+		State:             domain.ActivityIdle,
+		Event:             "terminal-idle",
+		ExpectedUpdatedAt: updatedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions[rec.ID].Activity.State; got != domain.ActivityIdle {
+		t.Fatalf("current reconciliation left activity %q", got)
+	}
+}
+
+func TestActivity_RepeatedUserPromptFencesTerminalReconciliation(t *testing.T) {
+	m, st, _ := newManager()
+	before := time.Unix(100, 0).UTC()
+	after := time.Unix(200, 0).UTC()
+	m.clock = func() time.Time { return after }
+	rec := working("mer-1")
+	rec.FirstSignalAt = before
+	rec.UpdatedAt = before
+	st.sessions[rec.ID] = rec
+
+	if err := m.ApplyActivitySignal(ctx, rec.ID, ports.ActivitySignal{
+		Valid: true,
+		State: domain.ActivityActive,
+		Event: "user-prompt-submit",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions[rec.ID].UpdatedAt; !got.Equal(after) {
+		t.Fatalf("updated at = %v, want %v", got, after)
+	}
+
+	if err := m.ApplyActivitySignal(ctx, rec.ID, ports.ActivitySignal{
+		Valid:             true,
+		State:             domain.ActivityIdle,
+		Event:             "terminal-idle",
+		ExpectedUpdatedAt: before,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions[rec.ID].Activity.State; got != domain.ActivityActive {
+		t.Fatalf("fresh prompt was overwritten with %q", got)
+	}
+}
+
+func TestActivity_BlankAgentSessionIDDoesNotOverwriteMetadata(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Metadata.AgentSessionID = "existing-native-1"
+	st.sessions["mer-1"] = rec
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+		Valid:          true,
+		State:          domain.ActivityActive,
+		AgentSessionID: "   ",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"].Metadata.AgentSessionID; got != "existing-native-1" {
+		t.Fatalf("AgentSessionID = %q, want existing-native-1", got)
+	}
+}
+
 func TestActivity_MissingSessionReturnsNotFound(t *testing.T) {
 	m, _, _ := newManager()
 	err := m.ApplyActivitySignal(ctx, "missing-1", ports.ActivitySignal{Valid: true, State: domain.ActivityWaitingInput})
 	if !errors.Is(err, ports.ErrSessionNotFound) {
 		t.Fatalf("err = %v, want ErrSessionNotFound", err)
 	}
+}
+
+func TestActivity_ExitedPreservesLiveSessionAndRejectsDelayedHooks(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.FirstSignalAt = time.Now().Add(-time.Minute)
+	st.sessions["mer-1"] = rec
+	m.flights["mer-1"] = &toolFlight{inflight: map[string]string{"tool-1": "Bash"}, blockedCandidate: "tool-1"}
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityExited}); err != nil {
+		t.Fatal(err)
+	}
+	exited := st.sessions["mer-1"]
+	if exited.IsTerminated || exited.Activity.State != domain.ActivityExited {
+		t.Fatalf("agent exit should preserve live session, got %+v", exited)
+	}
+	if _, ok := m.flights["mer-1"]; ok {
+		t.Fatal("tool-flight state leaked after agent exit")
+	}
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityActive}); err != nil {
+		t.Fatal(err)
+	}
+	stillExited := st.sessions["mer-1"]
+	if stillExited.IsTerminated || stillExited.Activity.State != domain.ActivityExited {
+		t.Fatalf("delayed active signal resurrected exited launch: %+v", stillExited)
+	}
+}
+
+func TestActivity_UserPromptResumesExitedWorkload(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	rec.Metadata.RuntimeLaunchID = "launch-2"
+	st.sessions["mer-1"] = rec
+	signalAt := time.Unix(123, 0).UTC()
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+		Valid:     true,
+		State:     domain.ActivityActive,
+		Event:     "user-prompt-submit",
+		Timestamp: signalAt,
+		LaunchID:  "launch-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := st.sessions["mer-1"]
+	if got.IsTerminated || got.Activity.State != domain.ActivityActive {
+		t.Fatalf("valid prompt did not resume exited workload: %+v", got)
+	}
+	if !got.Activity.LastActivityAt.Equal(signalAt) {
+		t.Fatalf("last activity = %v, want %v", got.Activity.LastActivityAt, signalAt)
+	}
+}
+
+func TestActivity_StaleUserPromptDoesNotResumeExitedWorkload(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	rec.Metadata.RuntimeLaunchID = "launch-2"
+	st.sessions["mer-1"] = rec
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+		Valid:    true,
+		State:    domain.ActivityActive,
+		Event:    "user-prompt-submit",
+		LaunchID: "launch-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"]; got != rec {
+		t.Fatalf("stale prompt resumed exited workload: %+v", got)
+	}
+}
+
+func TestActivity_StaleLaunchSignalIsIgnored(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Metadata.RuntimeLaunchID = "launch-2"
+	st.sessions["mer-1"] = rec
+	before := st.sessions["mer-1"]
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityExited, LaunchID: "launch-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions["mer-1"] != before {
+		t.Fatalf("stale process exit mutated session: %+v", st.sessions["mer-1"])
+	}
+}
+
+func TestActivity_NewLaunchSignalWaitsForMarkSpawned(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	rec.Metadata.RuntimeLaunchID = "launch-old"
+	st.sessions["mer-1"] = rec
+
+	if err := m.PrepareLaunch("mer-1", "launch-new"); err != nil {
+		t.Fatal(err)
+	}
+	signalAt := time.Unix(123, 0).UTC()
+	signalDone := make(chan error, 1)
+	go func() {
+		signalDone <- m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+			Valid:     true,
+			State:     domain.ActivityActive,
+			Timestamp: signalAt,
+			LaunchID:  "launch-new",
+		})
+	}()
+
+	select {
+	case err := <-signalDone:
+		t.Fatalf("new-generation signal completed before MarkSpawned: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	if err := m.MarkSpawned(ctx, "mer-1", domain.SessionMetadata{
+		RuntimeHandleID: "tmux-mer-1",
+		RuntimeLaunchID: "launch-new",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-signalDone; err != nil {
+		t.Fatal(err)
+	}
+
+	got := st.sessions["mer-1"]
+	if got.IsTerminated || got.Activity.State != domain.ActivityActive {
+		t.Fatalf("early signal was not applied after spawn commit: %+v", got)
+	}
+	if got.Metadata.RuntimeLaunchID != "launch-new" {
+		t.Fatalf("runtime launch id = %q, want launch-new", got.Metadata.RuntimeLaunchID)
+	}
+	if !got.FirstSignalAt.Equal(signalAt) {
+		t.Fatalf("first signal at = %v, want %v", got.FirstSignalAt, signalAt)
+	}
+}
+
+func TestActivity_CancelledLaunchReleasesAndRejectsEarlySignal(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	rec.Metadata.RuntimeLaunchID = "launch-old"
+	st.sessions["mer-1"] = rec
+
+	if err := m.PrepareLaunch("mer-1", "launch-new"); err != nil {
+		t.Fatal(err)
+	}
+	signalDone := make(chan error, 1)
+	go func() {
+		signalDone <- m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{
+			Valid:    true,
+			State:    domain.ActivityActive,
+			LaunchID: "launch-new",
+		})
+	}()
+
+	m.CancelLaunch("mer-1", "launch-new")
+	if err := <-signalDone; err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"]; got != rec {
+		t.Fatalf("cancelled launch signal mutated durable state: %+v", got)
+	}
+}
+
+func TestPrepareLaunchRejectsOverlappingGeneration(t *testing.T) {
+	m, _, _ := newManager()
+	if err := m.PrepareLaunch("mer-1", "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PrepareLaunch("mer-1", "launch-1"); err != nil {
+		t.Fatalf("same generation should be idempotent: %v", err)
+	}
+	if err := m.PrepareLaunch("mer-1", "launch-2"); err == nil {
+		t.Fatal("overlapping generation was accepted")
+	}
+	m.CancelLaunch("mer-1", "launch-1")
 }
 
 func TestMarkTerminated(t *testing.T) {
@@ -151,13 +533,23 @@ func TestMarkSpawnedStoresRuntimeMetadata(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = working("mer-1")
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", IsTerminated: true}
-	metadata := domain.SessionMetadata{Branch: "b", WorkspacePath: "/ws", RuntimeHandleID: "h1", AgentSessionID: "agent", Prompt: "prompt"}
+	metadata := domain.SessionMetadata{
+		Branch:            "b",
+		WorkspacePath:     "/ws",
+		WorkspaceRepoPath: "/repos/mer",
+		RuntimeHandleID:   "h1",
+		AgentSessionID:    "agent",
+		Prompt:            "prompt",
+	}
 	if err := m.MarkSpawned(ctx, "mer-1", metadata); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
 	if got.IsTerminated || got.Activity.State != domain.ActivityIdle || got.Metadata.RuntimeHandleID != "h1" {
 		t.Fatalf("spawn metadata wrong: %+v", got)
+	}
+	if got.Metadata.WorkspaceRepoPath != metadata.WorkspaceRepoPath {
+		t.Fatalf("workspace repo path = %q, want %q", got.Metadata.WorkspaceRepoPath, metadata.WorkspaceRepoPath)
 	}
 }
 
@@ -351,6 +743,58 @@ func TestPRObservation_CIFailingAndReviewBothNudge(t *testing.T) {
 	}
 }
 
+// A failed parent-stack lookup (the store read behind the merge-conflict
+// exemption) must not discard the CI/review nudges already queued for the same
+// PR. Only the merge-conflict nudge is skipped this cycle; CI and review still
+// send, the read error still surfaces so the observer logs and re-polls, and the
+// merge-conflict nudge fires once the read recovers.
+func TestPRObservation_MergeConflictReadErrorStillSendsCIAndReview(t *testing.T) {
+	m, st, msg := newManager()
+	st.sessions["mer-1"] = working("mer-1")
+	st.listPRsErr = errors.New("transient store read failure")
+	o := ports.PRObservation{
+		Fetched:      true,
+		URL:          "pr1",
+		CI:           domain.CIFailing,
+		Checks:       []ports.PRCheckObservation{{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, LogTail: "boom"}},
+		Review:       domain.ReviewChangesRequest,
+		Comments:     []ports.PRCommentObservation{{ID: "1", Author: "alice", Body: "fix this"}},
+		Mergeability: domain.MergeConflicting,
+	}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err == nil {
+		t.Fatal("want the deferred parent-stack read error surfaced")
+	}
+	// CI and review still fired despite the merge-conflict lookup failing; the
+	// merge-conflict nudge itself is skipped this cycle.
+	if len(msg.msgs) != 2 {
+		t.Fatalf("want CI and review nudges sent, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+	if !strings.Contains(msg.msgs[0], "boom") {
+		t.Fatalf("first nudge should carry the CI failure, got %q", msg.msgs[0])
+	}
+	if !strings.Contains(msg.msgs[1], "fix this") {
+		t.Fatalf("second nudge should carry the review feedback, got %q", msg.msgs[1])
+	}
+	for _, sent := range msg.msgs {
+		if strings.Contains(sent, "merge conflicts") {
+			t.Fatalf("merge-conflict nudge must be skipped on read error, got %q", sent)
+		}
+	}
+
+	// Next poll, the read recovers: the merge-conflict nudge now fires while
+	// CI/review stay deduped (their signatures persisted before the error).
+	st.listPRsErr = nil
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 3 {
+		t.Fatalf("want merge-conflict nudge on recovery with CI/review deduped, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+	if !strings.Contains(msg.msgs[2], "merge conflicts") {
+		t.Fatalf("third nudge should be the merge-conflict nudge, got %q", msg.msgs[2])
+	}
+}
+
 func TestPRObservation_CINudgeSanitizesLogTailControlChars(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
@@ -462,6 +906,20 @@ func TestPRObservation_MergeConflictNudgesAgent(t *testing.T) {
 	}
 }
 
+func TestPRObservation_ExitedAgentIsNotNudged(t *testing.T) {
+	m, st, msg := newManager()
+	rec := working("mer-1")
+	rec.Activity.State = domain.ActivityExited
+	st.sessions["mer-1"] = rec
+
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Mergeability: domain.MergeConflicting}); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("exited agent should not receive reaction nudges, got %v", msg.msgs)
+	}
+}
+
 func TestPRObservation_NudgeIncludesPRIdentity(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
@@ -490,7 +948,7 @@ func TestPRObservation_NudgeIncludesPRIdentity(t *testing.T) {
 	}
 }
 
-func TestPRObservation_MergedTerminatesWithoutNudge(t *testing.T) {
+func TestPRObservation_MergedStaysLiveWhenAutoTerminateDisabled(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
 	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
@@ -498,11 +956,62 @@ func TestPRObservation_MergedTerminatesWithoutNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
-	if !got.IsTerminated || got.Activity.State != domain.ActivityExited {
-		t.Fatalf("merged PR should terminate session, got %+v", got)
+	if got.IsTerminated || got.Activity.State == domain.ActivityExited {
+		t.Fatalf("merged PR should stay live when auto-terminate is disabled, got %+v", got)
 	}
 	if len(msg.msgs) != 0 {
 		t.Fatalf("merged PR should not send nudge, got %v", msg.msgs)
+	}
+}
+
+func TestPRObservation_MergedUsesConfiguredTerminator(t *testing.T) {
+	m, st, _ := newManager()
+	terminator := &fakeCompletionTerminator{}
+	m.SetCompletionTerminator(terminator)
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
+	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
+
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
+		t.Fatal(err)
+	}
+	if terminator.calls != 1 {
+		t.Fatalf("terminator calls = %d, want 1", terminator.calls)
+	}
+}
+
+func TestPRObservation_MergedTeardownFailureStaysLiveForRetry(t *testing.T) {
+	m, st, _ := newManager()
+	terminator := &fakeCompletionTerminator{err: errors.New("transient teardown failure")}
+	m.SetCompletionTerminator(terminator)
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
+	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
+
+	err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true})
+	if err == nil || !strings.Contains(err.Error(), "transient teardown failure") {
+		t.Fatalf("ApplyPRObservation err = %v, want teardown failure", err)
+	}
+	if st.sessions["mer-1"].IsTerminated {
+		t.Fatalf("failed teardown must not hide a live session: %+v", st.sessions["mer-1"])
+	}
+}
+
+func TestPRObservation_MergedRequiresConfiguredTerminator(t *testing.T) {
+	m, st, _ := newManager()
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
+	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
+
+	err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true})
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("ApplyPRObservation err = %v, want configuration error", err)
+	}
+	if st.sessions["mer-1"].IsTerminated {
+		t.Fatalf("missing terminator must not mark the session terminated: %+v", st.sessions["mer-1"])
 	}
 }
 
@@ -510,7 +1019,11 @@ func TestPRObservation_MergedTerminatesWithoutNudge(t *testing.T) {
 // completion bar is "no open PR remains AND at least one merged".
 func TestPRObservation_MergedWithOpenSiblingDoesNotTerminate(t *testing.T) {
 	m, st, _ := newManager()
-	st.sessions["mer-1"] = working("mer-1")
+	terminator := &fakeCompletionTerminator{}
+	m.SetCompletionTerminator(terminator)
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
 	st.prs["mer-1"] = []domain.PullRequest{
 		{URL: "pr1", Merged: true},
 		{URL: "pr2"},
@@ -521,12 +1034,19 @@ func TestPRObservation_MergedWithOpenSiblingDoesNotTerminate(t *testing.T) {
 	if got := st.sessions["mer-1"]; got.IsTerminated {
 		t.Fatalf("session with an open sibling PR must stay alive, got %+v", got)
 	}
+	if terminator.calls != 0 {
+		t.Fatalf("terminator calls = %d, want 0", terminator.calls)
+	}
 }
 
 // Once the last open PR merges (all PRs now merged), the session terminates.
 func TestPRObservation_LastMergeTerminatesSession(t *testing.T) {
 	m, st, _ := newManager()
-	st.sessions["mer-1"] = working("mer-1")
+	terminator := &fakeCompletionTerminator{}
+	m.SetCompletionTerminator(terminator)
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
 	st.prs["mer-1"] = []domain.PullRequest{
 		{URL: "pr1", Merged: true},
 		{URL: "pr2", Merged: true},
@@ -534,8 +1054,8 @@ func TestPRObservation_LastMergeTerminatesSession(t *testing.T) {
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr2", Merged: true}); err != nil {
 		t.Fatal(err)
 	}
-	if got := st.sessions["mer-1"]; !got.IsTerminated {
-		t.Fatalf("session should terminate once all PRs are merged, got %+v", got)
+	if terminator.calls != 1 {
+		t.Fatalf("terminator calls = %d, want 1", terminator.calls)
 	}
 }
 
@@ -544,13 +1064,20 @@ func TestPRObservation_LastMergeTerminatesSession(t *testing.T) {
 // shipped).
 func TestPRObservation_ClosedWithoutMergeDoesNotTerminate(t *testing.T) {
 	m, st, _ := newManager()
-	st.sessions["mer-1"] = working("mer-1")
+	terminator := &fakeCompletionTerminator{}
+	m.SetCompletionTerminator(terminator)
+	rec := working("mer-1")
+	rec.TerminateOnPRMerge = true
+	st.sessions["mer-1"] = rec
 	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Closed: true}}
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Closed: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := st.sessions["mer-1"]; got.IsTerminated {
 		t.Fatalf("a closed-without-merge PR must not terminate the session, got %+v", got)
+	}
+	if terminator.calls != 0 {
+		t.Fatalf("terminator calls = %d, want 0", terminator.calls)
 	}
 }
 
@@ -839,6 +1366,11 @@ func TestApplyReviewResultNoopsWhenIrrelevant(t *testing.T) {
 			result: ReviewResult{RunID: "run-1", PRURL: "pr1", Verdict: domain.VerdictChangesRequested},
 			rec:    domain.SessionRecord{ID: "mer-1", Activity: domain.Activity{State: domain.ActivityWaitingInput}},
 		},
+		{
+			name:   "worker agent exited",
+			result: ReviewResult{RunID: "run-1", PRURL: "pr1", Verdict: domain.VerdictChangesRequested},
+			rec:    domain.SessionRecord{ID: "mer-1", Activity: domain.Activity{State: domain.ActivityExited}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1092,6 +1624,60 @@ func TestMarkSpawnedClearsFirstSignal(t *testing.T) {
 type fakeNotificationSink struct {
 	intents []ports.NotificationIntent
 	err     error
+}
+
+type fakeReengagementTracker struct {
+	before domain.SessionRecord
+	after  domain.SessionRecord
+	event  string
+	calls  int
+}
+
+func (f *fakeReengagementTracker) ObserveActivity(_ context.Context, before, after domain.SessionRecord, event string) {
+	f.before = before
+	f.after = after
+	f.event = event
+	f.calls++
+}
+
+func TestActivity_ForwardsSameStateToolProgressToReengagement(t *testing.T) {
+	now := time.Now().UTC()
+	st := newFakeStore()
+	st.sessions["mer-orch"] = domain.SessionRecord{
+		ID: "mer-orch", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Activity:      domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
+		FirstSignalAt: now,
+	}
+	tracker := &fakeReengagementTracker{}
+	m := New(st, nil, WithOrchestratorReengagement(tracker))
+	if err := m.ApplyActivitySignal(context.Background(), "mer-orch", ports.ActivitySignal{
+		Valid: true, State: domain.ActivityActive, Event: "post-tool-use", Timestamp: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tracker.calls != 1 || tracker.event != "post-tool-use" {
+		t.Fatalf("tracker = %#v", tracker)
+	}
+}
+
+func TestActivity_ForwardsIdleTransitionToReengagement(t *testing.T) {
+	now := time.Now().UTC()
+	st := newFakeStore()
+	st.sessions["mer-orch"] = domain.SessionRecord{
+		ID: "mer-orch", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Activity:      domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
+		FirstSignalAt: now,
+	}
+	tracker := &fakeReengagementTracker{}
+	m := New(st, nil, WithOrchestratorReengagement(tracker))
+	if err := m.ApplyActivitySignal(context.Background(), "mer-orch", ports.ActivitySignal{
+		Valid: true, State: domain.ActivityIdle, Event: "stop", Timestamp: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if tracker.calls != 1 || tracker.before.Activity.State != domain.ActivityActive || tracker.after.Activity.State != domain.ActivityIdle {
+		t.Fatalf("tracker = %#v", tracker)
+	}
 }
 
 func (f *fakeNotificationSink) Notify(_ context.Context, intent ports.NotificationIntent) error {
@@ -1377,5 +1963,52 @@ func TestSCMObservation_ReadyToMergeSuppressedWhileWaitingInput(t *testing.T) {
 	}
 	if len(sink.intents) != 0 {
 		t.Fatalf("waiting-input session emitted ready notification: %+v", sink.intents)
+	}
+}
+
+func TestActivity_WorkerIdleDoesNotNudgeOrchestrator(t *testing.T) {
+	m, st, msg := newManager()
+	now := time.Now()
+	st.sessions["mer-orch"] = domain.SessionRecord{ID: "mer-orch", ProjectID: "mer", Kind: domain.KindOrchestrator, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, FirstSignalAt: now}
+	st.sessions["mer-8"] = domain.SessionRecord{ID: "mer-8", ProjectID: "mer", Kind: domain.KindWorker, DisplayName: "husky-setup", Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now}, FirstSignalAt: now}
+
+	if err := m.ApplyActivitySignal(ctx, "mer-8", ports.ActivitySignal{Valid: true, State: domain.ActivityIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-8"].Activity.State; got != domain.ActivityIdle {
+		t.Fatalf("worker activity = %q, want idle", got)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("orchestrator nudges = %d, want 0", len(msg.msgs))
+	}
+}
+
+func TestActivity_OrchestratorIdleDoesNotNudge(t *testing.T) {
+	m, st, msg := newManager()
+	now := time.Now()
+	st.sessions["mer-orch"] = domain.SessionRecord{ID: "mer-orch", ProjectID: "mer", Kind: domain.KindOrchestrator, Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now}, FirstSignalAt: now}
+
+	if err := m.ApplyActivitySignal(ctx, "mer-orch", ports.ActivitySignal{Valid: true, State: domain.ActivityIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-orch"].Activity.State; got != domain.ActivityIdle {
+		t.Fatalf("orchestrator activity = %q, want idle", got)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("orchestrator idle self-nudged: %d, want 0", len(msg.msgs))
+	}
+}
+
+func TestActivity_WorkerWaitingToIdleDoesNotNudge(t *testing.T) {
+	m, st, msg := newManager()
+	now := time.Now()
+	st.sessions["mer-orch"] = domain.SessionRecord{ID: "mer-orch", ProjectID: "mer", Kind: domain.KindOrchestrator, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now}, FirstSignalAt: now}
+	st.sessions["mer-8"] = domain.SessionRecord{ID: "mer-8", ProjectID: "mer", Kind: domain.KindWorker, Activity: domain.Activity{State: domain.ActivityWaitingInput, LastActivityAt: now}, FirstSignalAt: now}
+
+	if err := m.ApplyActivitySignal(ctx, "mer-8", ports.ActivitySignal{Valid: true, State: domain.ActivityIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("waiting_input->idle nudged: %d, want 0", len(msg.msgs))
 	}
 }

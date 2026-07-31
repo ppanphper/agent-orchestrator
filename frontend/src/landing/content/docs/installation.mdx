@@ -3,9 +3,6 @@ title: Installation
 description: Download AO, open it, and connect your tools.
 ---
 
-import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import { Step, Steps } from "fumadocs-ui/components/steps";
-import { Accordions, Accordion } from "fumadocs-ui/components/accordion";
 
 <InstallDownloads />
 
@@ -106,12 +103,14 @@ opencode --help
 <summary>
 	<span className="ao-legacy-cli-summary-copy">
 		<span className="ao-legacy-cli-summary-title">Using the legacy CLI?</span>
-		<span className="ao-legacy-cli-summary-note">Install or verify the frozen <code>@aoagents/ao</code> package, then run <code>ao start</code>.</span>
+		<span className="ao-legacy-cli-summary-note">npm still works but is no longer recommended. Verify the frozen <code>@aoagents/ao</code> package, then run <code>ao start</code> to move onto the desktop build.</span>
 	</span>
 	<span className="ao-legacy-cli-summary-icon" aria-hidden="true" />
 </summary>
 
 <div className="ao-legacy-cli-details__content">
+
+npm still works but is no longer recommended. `0.10.0` is the final version published to npm, and `@aoagents/ao` is frozen and will not receive further updates. These commands remain for existing CLI users; new setups should use the desktop download at the top of this page.
 
 <div className="ao-compact-tabs ao-legacy-install-tabs">
 
@@ -140,7 +139,7 @@ yarn global add @aoagents/ao
     <Tab value="from source">
 
 ```bash
-git clone https://github.com/AgentWrapper/agent-orchestrator
+git clone https://github.com/Untrivial-ai/agent-orchestrator
 cd agent-orchestrator
 pnpm install
 pnpm build

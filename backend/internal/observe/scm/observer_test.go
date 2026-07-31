@@ -137,6 +137,27 @@ type fakeProvider struct {
 	fetchBatches     [][]ports.SCMPRRef
 	logCalls         int
 	reviewCalls      int
+	identity         ports.SCMIdentity
+	identityErr      error
+	identityCalls    int
+}
+
+type fakeIdentityResolver struct {
+	identity ports.SCMIdentity
+	err      error
+	calls    int
+}
+
+func (r *fakeIdentityResolver) AuthenticatedIdentity(context.Context) (ports.SCMIdentity, error) {
+	r.calls++
+	return r.identity, r.err
+}
+
+func (p *fakeProvider) AuthenticatedIdentity(context.Context) (ports.SCMIdentity, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.identityCalls++
+	return p.identity, p.identityErr
 }
 
 func (p *fakeProvider) SCMCredentialsAvailable(context.Context) (bool, error) {
@@ -226,7 +247,7 @@ func (l *fakeLifecycle) ApplySCMObservation(_ context.Context, _ domain.SessionI
 }
 
 func newTestObserver(store *fakeStore, provider *fakeProvider, lc Lifecycle, now time.Time) *Observer {
-	return New(provider, store, lc, Config{Clock: func() time.Time { return now }, Tick: time.Hour, Logger: quietSlog(), CacheMax: 128})
+	return New(provider, store, lc, Config{Clock: func() time.Time { return now }, Tick: time.Hour, Logger: quietSlog(), CacheMax: 128, IdentityResolver: provider})
 }
 
 func TestDispatchOrderIsDeterministic(t *testing.T) {
@@ -251,6 +272,20 @@ func TestDispatchOrderIsDeterministic(t *testing.T) {
 				t.Fatalf("run %d: order[%d]=%q, want %q (full %v)", run, i, got[i], want[i], got)
 			}
 		}
+	}
+}
+
+func TestTrackedPRsForSessionRetainsTerminalPRsOnlyForAutoTerminationRetry(t *testing.T) {
+	prs := []domain.PullRequest{
+		{Number: 1},
+		{Number: 2, Merged: true},
+		{Number: 3, Closed: true},
+	}
+	if got := trackedPRsForSession(domain.SessionRecord{}, prs); len(got) != 1 || got[0].Number != 1 {
+		t.Fatalf("default tracked PRs = %+v, want only open PR", got)
+	}
+	if got := trackedPRsForSession(domain.SessionRecord{TerminateOnPRMerge: true}, prs); len(got) != 3 {
+		t.Fatalf("auto-termination tracked PRs = %+v, want open and terminal PRs", got)
 	}
 }
 func quietSlog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -532,6 +567,70 @@ func TestPoll_RepoETag200DiscoversPRAndRefreshesSamePoll(t *testing.T) {
 	}
 }
 
+func TestPoll_DiscoversOnlyPRsFromAuthenticatedHuman(t *testing.T) {
+	store := testStoreWithSession()
+	provider := &fakeProvider{
+		repoGuards: map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "v2"}},
+		openPRs: map[string][]ports.SCMPRObservation{prKey(testRepo, 0): {
+			{URL: "https://github.com/o/r/pull/1", Number: 1, SourceBranch: "feat", HeadRepo: "o/r", TargetBranch: "main", HeadSHA: "sha1", Author: "other"},
+			{URL: "https://github.com/o/r/pull/2", Number: 2, SourceBranch: "feat", HeadRepo: "o/r", TargetBranch: "main", HeadSHA: "sha2", Author: "ALICE"},
+		}},
+		observations: map[string]ports.SCMObservation{prKey(testRepo, 2): testObs(2)},
+	}
+	identity := &fakeIdentityResolver{identity: ports.SCMIdentity{Login: "alice", Human: true}}
+	obs := New(provider, store, &fakeLifecycle{}, Config{
+		Clock:            func() time.Time { return time.Unix(1, 0).UTC() },
+		Tick:             time.Hour,
+		Logger:           quietSlog(),
+		CacheMax:         128,
+		IdentityResolver: identity,
+	})
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if identity.calls != 1 {
+		t.Fatalf("identity resolver calls = %d, want 1", identity.calls)
+	}
+	if len(provider.fetchBatches) != 1 || len(provider.fetchBatches[0]) != 1 || provider.fetchBatches[0][0].Number != 2 {
+		t.Fatalf("fetched PRs = %#v, want only authenticated author's PR #2", provider.fetchBatches)
+	}
+	for _, write := range store.writes {
+		if write.pr.Number == 1 {
+			t.Fatal("foreign author's PR was persisted")
+		}
+	}
+}
+
+func TestPoll_PreservesBranchDiscoveryWithoutHumanIdentity(t *testing.T) {
+	tests := []struct {
+		name        string
+		identity    ports.SCMIdentity
+		identityErr error
+	}{
+		{name: "lookup error", identityErr: errors.New("identity unavailable")},
+		{name: "bot account", identity: ports.SCMIdentity{Login: "ao-bot", Human: false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := testStoreWithSession()
+			provider := &fakeProvider{
+				repoGuards:   map[string]ports.SCMGuardResult{prKey(testRepo, 0): {ETag: "v2"}},
+				openPRs:      map[string][]ports.SCMPRObservation{prKey(testRepo, 0): {{URL: "https://github.com/o/r/pull/1", Number: 1, SourceBranch: "feat", HeadRepo: "o/r", TargetBranch: "main", HeadSHA: "sha1", Author: "other"}}},
+				observations: map[string]ports.SCMObservation{prKey(testRepo, 1): testObs(1)},
+				identity:     tt.identity,
+				identityErr:  tt.identityErr,
+			}
+			obs := newTestObserver(store, provider, &fakeLifecycle{}, time.Unix(1, 0).UTC())
+			if err := obs.Poll(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.fetchBatches) != 1 || provider.fetchBatches[0][0].Number != 1 {
+				t.Fatalf("branch fallback did not discover PR: %#v", provider.fetchBatches)
+			}
+		})
+	}
+}
+
 // A session whose branch is the prefix of two open PRs (its root plus a stacked
 // child on branch "feat/child") picks up both PRs in a single poll.
 func TestPoll_DiscoversStackedChildByBranchPrefix(t *testing.T) {
@@ -592,6 +691,18 @@ func TestPoll_DiscoversSiblingUnderRootSessionNamespace(t *testing.T) {
 	}
 	if len(lc.observed) != 1 {
 		t.Fatalf("lifecycle observations = %d, want 1", len(lc.observed))
+	}
+}
+
+func TestMatchSession_PrefersExactBranchOverNamespaceMatch(t *testing.T) {
+	exact := sessionRepo{session: domain.SessionRecord{ID: "exact"}, branch: "ao/p-1"}
+	namespace := sessionRepo{session: domain.SessionRecord{ID: "namespace"}, branch: "ao/p-1/root"}
+	got, ok := matchSession([]sessionRepo{namespace, exact}, "ao/p-1")
+	if !ok {
+		t.Fatal("expected a matching session")
+	}
+	if got.session.ID != exact.session.ID {
+		t.Fatalf("matched session = %q, want exact branch owner %q", got.session.ID, exact.session.ID)
 	}
 }
 
@@ -1379,6 +1490,92 @@ func TestDiscoverSubjects_BackfillsRepoOriginURL(t *testing.T) {
 	}
 	if got := store.projects["p"].RepoOriginURL; got != "https://github.com/o/r.git" {
 		t.Fatalf("RepoOriginURL after backfill = %q, want https://github.com/o/r.git", got)
+	}
+}
+
+// TestPoll_StaleOpenPRForcedRefreshAfterMaxAge verifies that an open PR whose
+// LastPRFetchAt is zero (never fetched) is re-fetched even when both the repo
+// ETag guard and the commit checks guard return NotModified. This covers the
+// post-merge stale-ETag scenario where the PR has been merged server-side but
+// the provider ETag signals no change.
+func TestPoll_StaleOpenPRForcedRefreshAfterMaxAge(t *testing.T) {
+	store := testStoreWithSession()
+	local := knownPR(1)
+	// Fully-populated open PR — all hashes set, not merged, not closed.
+	local.Merged = false
+	local.Closed = false
+	store.prs["p-1"] = []domain.PullRequest{local}
+
+	// Provider: both guards return NotModified, but the observation reports merged.
+	mergedObs := testObs(1)
+	mergedObs.PR.Merged = true
+	mergedObs.PR.State = "merged"
+
+	repoKey := prKey(testRepo, 0)
+	commitCacheKey := commitKey(testRepo, "sha1")
+
+	provider := &fakeProvider{
+		repoGuards:  map[string]ports.SCMGuardResult{repoKey: {ETag: "v1", NotModified: true}},
+		checkGuards: map[string]ports.SCMGuardResult{commitCacheKey: {ETag: "ci1", NotModified: true}},
+		observations: map[string]ports.SCMObservation{
+			prKey(testRepo, 1): mergedObs,
+		},
+	}
+
+	now := time.Unix(1000, 0).UTC()
+	obs := newTestObserver(store, provider, &fakeLifecycle{}, now)
+	// Pre-seed ETags so both guards fire NotModified.
+	obs.Cache.RepoPRListETag[repoKey] = "v1"
+	obs.Cache.CommitChecksETag[commitCacheKey] = "ci1"
+	// Leave LastPRFetchAt empty (zero time) for the PR key — forces refresh.
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.fetchBatches) != 1 {
+		t.Fatalf("expected 1 fetch batch (stale PR forced refresh), got %d: %#v", len(provider.fetchBatches), provider.fetchBatches)
+	}
+	var mergedWrite *fakeWrite
+	for i := range store.writes {
+		if store.writes[i].pr.Number == 1 && store.writes[i].pr.Merged {
+			mergedWrite = &store.writes[i]
+			break
+		}
+	}
+	if mergedWrite == nil {
+		t.Fatalf("expected a write with pr.Merged==true, got writes: %#v", store.writes)
+	}
+
+	// Now simulate a recent fetch: set LastPRFetchAt to now and poll again.
+	// The PR is now merged in the store, so openTrackedPRs will not include it.
+	// Reset the store to still have the open PR so we test the max-age guard specifically.
+	store.writes = nil
+	provider.fetchBatches = nil
+	store.prs["p-1"] = []domain.PullRequest{local} // restore open PR
+	obs.Cache.LastPRFetchAt[prKey(testRepo, 1)] = now
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.fetchBatches) != 0 {
+		t.Fatalf("expected no fetch batch within max-age window, got %d: %#v", len(provider.fetchBatches), provider.fetchBatches)
+	}
+
+	// Backdate the last fetch beyond DefaultPRMaxAge. This is the behavior the PR
+	// actually adds: the max-age guard (not the never-fetched branch) forces a
+	// refetch. The clock is pinned, so parts 1 and 2 only cover last.IsZero() and
+	// a zero elapsed time; without this, deleting the `> DefaultPRMaxAge` compare
+	// would still pass.
+	store.writes = nil
+	provider.fetchBatches = nil
+	store.prs["p-1"] = []domain.PullRequest{local} // restore open PR
+	obs.Cache.LastPRFetchAt[prKey(testRepo, 1)] = now.Add(-(DefaultPRMaxAge + time.Minute))
+
+	if err := obs.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.fetchBatches) != 1 {
+		t.Fatalf("expected forced refresh once older than DefaultPRMaxAge, got %d: %#v", len(provider.fetchBatches), provider.fetchBatches)
 	}
 }
 

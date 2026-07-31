@@ -188,13 +188,17 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	root.AddCommand(newSpawnCommand(ctx))
 	root.AddCommand(newSendCommand(ctx))
 	root.AddCommand(newPreviewCommand(ctx))
+	root.AddCommand(newBrowserCommand(ctx))
 	root.AddCommand(newHooksCommand(ctx))
+	root.AddCommand(newAgentProcessCommand(ctx))
 	root.AddCommand(newLaunchCommand(ctx))
 	root.AddCommand(newPtyHostCommand())
 	root.AddCommand(newImportCommand(ctx))
+	root.AddCommand(newDevCommand(ctx))
 	root.AddCommand(newProjectCommand(ctx))
 	root.AddCommand(newSessionCommand(ctx))
 	root.AddCommand(newOrchestratorCommand(ctx))
+	root.AddCommand(newPRCommand(ctx))
 	root.AddCommand(newReviewCommand(ctx))
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newVersionCommand())
@@ -207,11 +211,35 @@ type commandContext struct {
 }
 
 func shouldEmitCLIInvocation(cmd *cobra.Command) bool {
-	switch strings.TrimSpace(cmd.CommandPath()) {
-	case "ao daemon", "ao start", "ao completion", "ao help":
+	commandPath := strings.TrimSpace(cmd.CommandPath())
+	if isRoutineInternalCLICommand(commandPath) {
+		return false
+	}
+	switch commandPath {
+	// "ao daemon"/"ao start" are supervisor-driven bootstrapping, and
+	// "ao completion"/"ao help" are shell setup and self-documentation.
+	// "ao pty-host" and "ao agent-process" are internal runtime processes.
+	// None reflect user activity.
+	case "ao daemon", "ao start", "ao completion", "ao help", "ao pty-host", "ao agent-process", "ao agent-process supervise":
 		return false
 	default:
 		return true
+	}
+}
+
+func isRoutineInternalCLICommand(commandPath string) bool {
+	switch strings.TrimSpace(commandPath) {
+	case "ao status",
+		"ao session ls",
+		"ao session get",
+		"ao project ls",
+		"ao project get",
+		"ao orchestrator ls",
+		"ao hooks",
+		"ao pty-host":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -221,7 +249,18 @@ func (c *commandContext) emitCLIInvoked(ctx context.Context, cmd *cobra.Command)
 	_ = c.postLoopbackJSON(reqCtx, "/internal/telemetry/cli-invoked", map[string]string{
 		"command":     cmd.Name(),
 		"commandPath": cmd.CommandPath(),
+		"actorType":   cliInvocationActorType(cmd),
 	})
+}
+
+func cliInvocationActorType(cmd *cobra.Command) string {
+	if strings.TrimSpace(cmd.CommandPath()) == "ao hooks" {
+		return "agent"
+	}
+	if sessionIDPattern.MatchString(strings.TrimSpace(os.Getenv("AO_SESSION_ID"))) {
+		return "agent"
+	}
+	return "user"
 }
 
 func (c *commandContext) emitCLIUsageError(ctx context.Context, args []string, err error) {
@@ -236,12 +275,27 @@ func (c *commandContext) emitCLIUsageError(ctx context.Context, args []string, e
 }
 
 func usageErrorCommand(args []string) (string, string) {
+	// Only tokens that match registered subcommands may enter the reported
+	// path: anything past the deepest match is user data (session names,
+	// prompts, orchestrator names) and must never ride into telemetry.
+	current := NewRootCommand(Deps{})
 	tokens := []string{"ao"}
 	for _, arg := range args {
 		if strings.HasPrefix(arg, "-") {
 			break
 		}
+		var next *cobra.Command
+		for _, sub := range current.Commands() {
+			if sub.Name() == arg || sub.HasAlias(arg) {
+				next = sub
+				break
+			}
+		}
+		if next == nil {
+			break
+		}
 		tokens = append(tokens, arg)
+		current = next
 	}
 	commandPath := strings.Join(tokens, " ")
 	command := "ao"
@@ -249,6 +303,15 @@ func usageErrorCommand(args []string) (string, string) {
 		command = tokens[len(tokens)-1]
 	}
 	return command, commandPath
+}
+
+func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validate(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
+	}
 }
 
 func noArgs(cmd *cobra.Command, args []string) error {

@@ -63,6 +63,9 @@ func TestPostHogSinkCapturesEvent(t *testing.T) {
 		if props["project_id_hash"] == "" || props["session_id_hash"] == "" {
 			t.Fatalf("hashed ids missing from properties: %#v", props)
 		}
+		if props["$process_person_profile"] != false {
+			t.Fatalf("properties.$process_person_profile = %#v, want false", props["$process_person_profile"])
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("PostHog sink did not send request")
 	}
@@ -175,9 +178,18 @@ func TestPostHogSinkSanitizesAppActivePayload(t *testing.T) {
 
 	select {
 	case req := <-requests:
+		if got := req["event"]; got != "ao.v2.app.active" {
+			t.Fatalf("event = %#v, want ao.v2.app.active", got)
+		}
 		props, ok := req["properties"].(map[string]any)
 		if !ok {
 			t.Fatalf("properties type = %T, want map[string]any", req["properties"])
+		}
+		if props["legacy_event_name"] != "ao.app.active" {
+			t.Fatalf("legacy_event_name = %#v, want ao.app.active", props["legacy_event_name"])
+		}
+		if props["telemetry_schema_version"] != float64(2) {
+			t.Fatalf("telemetry_schema_version = %#v, want 2", props["telemetry_schema_version"])
 		}
 		if props["channel"] != "cli" || props["command"] != "spawn" || props["command_path"] != "ao spawn" {
 			t.Fatalf("sanitized properties = %#v, want active CLI metadata", props)

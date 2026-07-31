@@ -71,11 +71,32 @@ type AgentBinaryResolver interface {
 	ResolveBinary(ctx context.Context) (path string, err error)
 }
 
+// AgentExitDetectionMode describes how AO learns that an agent CLI process
+// ended while its terminal runtime remains alive.
+type AgentExitDetectionMode string
+
+const (
+	// AgentExitDetectionSupervisor means AO must wrap the CLI in its generic
+	// process supervisor because the adapter has no reliable exit hook.
+	AgentExitDetectionSupervisor AgentExitDetectionMode = "supervisor"
+)
+
+// AgentExitDetector is an optional adapter capability. Adapters that omit it
+// keep their existing launch behavior.
+type AgentExitDetector interface {
+	ExitDetectionMode() AgentExitDetectionMode
+}
+
 // AgentPromptReadinessProvider is an optional capability for interactive
 // adapters that receive their first task after startup. It lets AO wait until a
 // terminal UI is ready before injecting text through the runtime.
 type AgentPromptReadinessProvider interface {
 	PromptReadinessHints(ctx context.Context, cfg LaunchConfig) (PromptReadinessHints, error)
+}
+
+// TerminalActivityDetector derives activity only from authoritative terminal UI markers.
+type TerminalActivityDetector interface {
+	DetectTerminalActivity(output string) (domain.ActivityState, bool)
 }
 
 // PromptReadinessHints describes when an after-start prompt should be sent.
@@ -128,6 +149,16 @@ type AgentResolver interface {
 type ActivitySignaler interface {
 	EmitsSubmitActivity() bool
 	EmitsBlockedActivity() bool
+}
+
+// ActiveTurnSteerer is an OPTIONAL capability an Agent adapter implements when
+// submitting input while its harness is mid-turn STEERS the running turn rather
+// than being swallowed, queued, or applied to a dialog. AO uses it to decide
+// whether an unsolicited coordination message may be written into an active
+// session. Adapters that do not implement it are treated as unsafe to steer, so
+// an unknown harness is only ever written to while idle.
+type ActiveTurnSteerer interface {
+	SteersActiveTurn() bool
 }
 
 // MetadataKeyAgentSessionID is the SessionRef.Metadata key that carries an
@@ -204,6 +235,7 @@ type LaunchConfig struct {
 type WorkspaceHookConfig struct {
 	Config           AgentConfig
 	DataDir          string
+	Env              map[string]string
 	SessionID        string
 	SystemPrompt     string
 	SystemPromptFile string
@@ -213,6 +245,7 @@ type WorkspaceHookConfig struct {
 // RestoreConfig carries inputs needed to continue an existing native agent session.
 type RestoreConfig struct {
 	Config      AgentConfig
+	DataDir     string
 	Kind        domain.SessionKind
 	Permissions PermissionMode
 	Session     SessionRef

@@ -38,7 +38,7 @@ func (f *fakePreviewSessions) SetPreview(_ context.Context, id domain.SessionID,
 	return domain.Session{}, nil
 }
 
-func TestPollerSetsPreviewWhenActiveWorkerEntryAppears(t *testing.T) {
+func TestPollerDoesNotOpenUntargetedWorkerEntry(t *testing.T) {
 	workspace := t.TempDir()
 	writeFile(t, filepath.Join(workspace, "index.html"), "<main>hello</main>")
 	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
@@ -48,16 +48,13 @@ func TestPollerSetsPreviewWhenActiveWorkerEntryAppears(t *testing.T) {
 		t.Fatalf("Poll: %v", err)
 	}
 
-	assertSets(t, svc.sets, previewSet{
-		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html",
-	})
+	assertSets(t, svc.sets)
 }
 
-func TestPollerUsesFirstExistingEntrypoint(t *testing.T) {
+func TestPollerNormalizesExplicitWorkspaceEntrypoint(t *testing.T) {
 	workspace := t.TempDir()
 	writeFile(t, filepath.Join(workspace, "dist", "index.html"), "<main>dist</main>")
-	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "dist/index.html")}}
 	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
 
 	if err := poller.Poll(context.Background()); err != nil {
@@ -66,15 +63,15 @@ func TestPollerUsesFirstExistingEntrypoint(t *testing.T) {
 
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/dist/index.html",
+		url: mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "dist/index.html"),
 	})
 }
 
-func TestPollerPreservesEntrypointPriority(t *testing.T) {
+func TestPollerDoesNotReplaceExplicitEntrypointWithAnotherStaticFile(t *testing.T) {
 	workspace := t.TempDir()
 	writeFile(t, filepath.Join(workspace, "public", "index.html"), "<main>public</main>")
 	writeFile(t, filepath.Join(workspace, "dist", "index.html"), "<main>dist</main>")
-	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "dist/index.html")}}
 	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
 
 	if err := poller.Poll(context.Background()); err != nil {
@@ -83,7 +80,7 @@ func TestPollerPreservesEntrypointPriority(t *testing.T) {
 
 	assertSets(t, svc.sets, previewSet{
 		id:  "ao-1",
-		url: "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/public/index.html",
+		url: mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "dist/index.html"),
 	})
 }
 
@@ -91,7 +88,7 @@ func TestPollerRefreshesOnlyWhenEntrypointChanges(t *testing.T) {
 	workspace := t.TempDir()
 	entry := filepath.Join(workspace, "index.html")
 	writeFile(t, entry, "<main>v1</main>")
-	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "index.html")}}
 	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
 
 	if err := poller.Poll(context.Background()); err != nil {
@@ -122,14 +119,14 @@ func TestPollerRediscoverEntryAfterDeleteAndRecreate(t *testing.T) {
 	workspace := t.TempDir()
 	entry := filepath.Join(workspace, "index.html")
 	writeFile(t, entry, "<main>v1</main>")
-	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "index.html")}}
 	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
 
-	// First poll discovers the entry and sets the preview.
+	// First poll normalizes the explicitly selected workspace entry.
 	if err := poller.Poll(context.Background()); err != nil {
 		t.Fatalf("first Poll: %v", err)
 	}
-	wantURL := "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/index.html"
+	wantURL := mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "index.html")
 	assertSets(t, svc.sets, previewSet{id: "ao-1", url: wantURL})
 
 	// Delete the entry — poller must clear the preview and mark the session cleared.
@@ -147,9 +144,16 @@ func TestPollerRediscoverEntryAfterDeleteAndRecreate(t *testing.T) {
 	}
 
 	// Recreate the entry — poller must re-discover.
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("third Poll (still deleted): %v", err)
+	}
+	if len(svc.sets) != 2 {
+		t.Fatalf("sets while entry remains deleted = %#v, want no repeated clear", svc.sets)
+	}
+
 	writeFile(t, entry, "<main>v2</main>")
 	if err := poller.Poll(context.Background()); err != nil {
-		t.Fatalf("third Poll (recreate): %v", err)
+		t.Fatalf("fourth Poll (recreate): %v", err)
 	}
 	if len(svc.sets) != 3 {
 		t.Fatalf("sets after recreate = %#v, want 3 sets (discover + clear + rediscover)", svc.sets)
@@ -189,6 +193,97 @@ func TestPollerDoesNotOverrideExplicitPreviewTarget(t *testing.T) {
 	if len(svc.sets) != 0 {
 		t.Fatalf("sets = %#v, want no automatic override", svc.sets)
 	}
+}
+
+func TestPollerMigratesLegacyWorkspacePreviewURL(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "index.html"), "<main>hello</main>")
+	writeFile(t, filepath.Join(workspace, "docs", "report.html"), "<main>chosen report</main>")
+	legacy := "http://127.0.0.1:3001/api/v1/sessions/ao-1/preview/files/docs/report.html"
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, legacy)}}
+	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
+
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+
+	assertSets(t, svc.sets, previewSet{
+		id:  "ao-1",
+		url: mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "docs/report.html"),
+	})
+}
+
+func TestPollerPreservesStoredRelativeEntry(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "index.html"), "<main>default</main>")
+	writeFile(t, filepath.Join(workspace, "docs", "report.html"), "<main>chosen report</main>")
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "docs/report.html")}}
+	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
+
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+
+	assertSets(t, svc.sets, previewSet{
+		id:  "ao-1",
+		url: mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "docs/report.html"),
+	})
+}
+
+func TestPollerRewritesStoredOriginToActualDaemonPortWithoutChangingEntry(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "index.html"), "<main>default</main>")
+	writeFile(t, filepath.Join(workspace, "docs", "report.html"), "<main>chosen report</main>")
+	old := mustFileURL(t, "http://127.0.0.1:3001", "ao-1", "docs/report.html")
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, old)}}
+	poller := NewPoller(svc, svc, "http://127.0.0.1:49152", PollerConfig{Logger: discardLogger()})
+
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+
+	assertSets(t, svc.sets, previewSet{
+		id:  "ao-1",
+		url: mustFileURL(t, "http://127.0.0.1:49152", "ao-1", "docs/report.html"),
+	})
+}
+
+func TestPollerDoesNotAutoPreviewMarkdownOnlyNewSession(t *testing.T) {
+	// A brand-new session (never explicitly previewed) whose workspace contains
+	// only Markdown documents — no index.html — must NOT be auto-previewed.
+	// Surfacing an arbitrary repo README as the initial browser target is noise.
+	// See issue #2859.
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "README.md"), "# project")
+	writeFile(t, filepath.Join(workspace, "docs", "setup.md"), "# setup")
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, "")}}
+	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
+
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if len(svc.sets) != 0 {
+		t.Fatalf("sets = %#v, want no auto-preview for a Markdown-only new session", svc.sets)
+	}
+}
+
+func TestPollerKeepsMarkdownPreviewFreshOnceExplicitlySet(t *testing.T) {
+	// Once a session has been explicitly previewed against a workspace Markdown
+	// file (workspaceOwned), the poller must still keep that preview fresh — the
+	// document-fallback restriction only applies to never-previewed sessions.
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "docs", "report.md"), "# report")
+	relative := "docs/report.md"
+	svc := &fakePreviewSessions{sessions: []domain.SessionRecord{workerSession("ao-1", workspace, relative)}}
+	poller := NewPoller(svc, svc, "http://127.0.0.1:3001", PollerConfig{Logger: discardLogger()})
+
+	if err := poller.Poll(context.Background()); err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	assertSets(t, svc.sets, previewSet{
+		id:  "ao-1",
+		url: mustFileURL(t, "http://127.0.0.1:3001", "ao-1", relative),
+	})
 }
 
 func TestPollerSkipsNonWorkerSessions(t *testing.T) {

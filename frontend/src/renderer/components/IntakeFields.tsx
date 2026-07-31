@@ -1,7 +1,11 @@
-import { Info } from "lucide-react";
+import { FolderGit2, Inbox, Info, TriangleAlert, UserRound } from "lucide-react";
 import type { components } from "../../api/schema";
+import { cn } from "../lib/utils";
 import { Label } from "./ui/label";
+import { SettingsRow } from "./settings/SettingsRow";
+import { Switch } from "./ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { useI18n } from "../lib/i18n";
 
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 
@@ -82,6 +86,9 @@ export function IntakeFields({
 	onChange,
 	repoPreview,
 	compact = false,
+	controlClassName,
+	labelClassName,
+	variant = "default",
 }: {
 	form: IntakeForm;
 	onChange: (patch: Partial<IntakeForm>) => void;
@@ -89,13 +96,63 @@ export function IntakeFields({
 	// compact drops the descriptive/help prose and folds the explanation into an
 	// info-icon tooltip — used by the create-project sheet, which stays minimal.
 	compact?: boolean;
+	controlClassName?: string;
+	labelClassName?: string;
+	variant?: "default" | "settings";
 }) {
+	const { t } = useI18n();
 	const needsRule = intakeNeedsRule(form);
+	if (variant === "settings") {
+		return (
+			<div className="flex flex-col gap-1.5">
+				<SettingsRow icon={Inbox} label={t("Enable issue intake")}>
+					<Switch
+						aria-label={t("Enable issue intake")}
+						checked={form.enabled}
+						onCheckedChange={(enabled) => onChange({ enabled })}
+					/>
+				</SettingsRow>
+				{form.enabled && (
+					<>
+						{repoPreview && (
+							<SettingsRow icon={FolderGit2} label={t("Repository")}>
+								{repoPreview.value ? (
+									<a
+										href={`https://github.com/${repoPreview.value}`}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="settings-row-value text-settings-accent hover:underline"
+									>
+										{repoPreview.value}
+									</a>
+								) : (
+									<span className="settings-row-value">
+										{t("Could not detect a GitHub repo from this project's git origin.")}
+									</span>
+								)}
+							</SettingsRow>
+						)}
+						<SettingsRow icon={UserRound} label={t("Assignee")}>
+							<input
+								id="intakeAssignee"
+								aria-label={t("Assignee")}
+								className="settings-inline-input"
+								value={form.assignee}
+								onChange={(e) => onChange({ assignee: e.target.value })}
+								placeholder={t("type username or * for any")}
+							/>
+						</SettingsRow>
+						{needsRule && <IntakeAssigneeError />}
+					</>
+				)}
+			</div>
+		);
+	}
 	return (
 		<div className="flex flex-col gap-4">
 			{!compact && (
 				<p className="text-xs leading-row text-muted-foreground">
-					Auto-spawn worker sessions from matching tracker issues.
+					{t("Auto-spawn worker sessions from matching tracker issues.")}
 				</p>
 			)}
 			<div className="flex items-center gap-2">
@@ -106,7 +163,7 @@ export function IntakeFields({
 						checked={form.enabled}
 						onChange={(e) => onChange({ enabled: e.target.checked })}
 					/>
-					Enable issue intake
+					{t("Enable issue intake")}
 				</label>
 				{compact && (
 					<TooltipProvider delayDuration={0}>
@@ -115,12 +172,12 @@ export function IntakeFields({
 								<button
 									type="button"
 									className="grid size-icon-base place-items-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none"
-									aria-label="What does enabling issue intake do?"
+									aria-label={t("What does enabling issue intake do?")}
 								>
 									<Info className="size-3.5" aria-hidden="true" />
 								</button>
 							</TooltipTrigger>
-							<TooltipContent>Auto-spawns a worker session for each matching GitHub issue.</TooltipContent>
+							<TooltipContent>{t("Auto-spawns a worker session for each matching GitHub issue.")}</TooltipContent>
 						</Tooltip>
 					</TooltipProvider>
 				)}
@@ -128,7 +185,7 @@ export function IntakeFields({
 			{form.enabled && (
 				<>
 					{repoPreview && (
-						<IntakeField label="Repository">
+						<IntakeField label={t("Repository")} labelClassName={labelClassName}>
 							{repoPreview.value ? (
 								<a
 									href={`https://github.com/${repoPreview.value}`}
@@ -140,33 +197,54 @@ export function IntakeFields({
 								</a>
 							) : (
 								<span className="text-control text-muted-foreground">
-									Could not detect a GitHub repo from this project's git origin.
+									{t("Could not detect a GitHub repo from this project's git origin.")}
 								</span>
 							)}
 						</IntakeField>
 					)}
-					<IntakeField label="Assignee" htmlFor="intakeAssignee">
+					<IntakeField label={t("Assignee")} htmlFor="intakeAssignee" labelClassName={labelClassName}>
 						<input
 							id="intakeAssignee"
-							className="h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak"
+							className={cn(
+								"h-control-form w-full rounded-md border border-input bg-transparent px-2.5 text-control text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak",
+								controlClassName,
+							)}
 							value={form.assignee}
 							onChange={(e) => onChange({ assignee: e.target.value })}
-							placeholder="type username or * for any"
+							placeholder={t("type username or * for any")}
 						/>
 					</IntakeField>
-					{!compact && needsRule && (
-						<p className="text-xs leading-row text-error">Enabling intake requires an assignee.</p>
-					)}
+					{!compact && needsRule && <IntakeAssigneeError />}
 				</>
 			)}
 		</div>
 	);
 }
 
-function IntakeField({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
+function IntakeAssigneeError() {
+	const { t } = useI18n();
+	return (
+		<p className="flex items-center gap-1.5 px-1 text-xs leading-row text-error">
+			<TriangleAlert className="size-3 shrink-0 text-error" aria-hidden="true" />
+			{t("Enabling intake requires an assignee.")}
+		</p>
+	);
+}
+
+function IntakeField({
+	label,
+	htmlFor,
+	labelClassName,
+	children,
+}: {
+	label: string;
+	htmlFor?: string;
+	labelClassName?: string;
+	children: React.ReactNode;
+}) {
 	return (
 		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
+			<Label htmlFor={htmlFor} className={cn("text-xs text-muted-foreground", labelClassName)}>
 				{label}
 			</Label>
 			{children}

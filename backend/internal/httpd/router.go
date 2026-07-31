@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -46,12 +47,14 @@ type ControlDeps struct {
 func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal.Manager, deps APIDeps, control ControlDeps) chi.Router {
 	log = loggerOrDefault(log)
 	r := chi.NewRouter()
+	api := NewAPI(cfg, deps)
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(requestLogger(log, deps.Telemetry))
 	r.Use(recoverTelemetry(log, deps.Telemetry))
 	r.Use(corsMiddleware(cfg.AllowedOrigins))
+	r.Use(previewOriginMiddleware(api.sessions))
 
 	// JSON envelopes for unmatched routes / methods — chi's defaults are
 	// text/plain, which would break consumers that parse every response as
@@ -59,21 +62,36 @@ func NewRouterWithControl(cfg config.Config, log *slog.Logger, termMgr *terminal
 	r.NotFound(notFoundJSON)
 	r.MethodNotAllowed(methodNotAllowedJSON)
 
-	mountHealth(r)
+	mountHealth(r, cfg)
 	mountTerminalMux(r, termMgr, log)
 	mountControl(r, control)
-	mountTelemetry(r, deps.Telemetry)
+	mountTelemetry(r, cfg, deps.Telemetry)
 	mountMobile(r, deps.Mobile)
-	NewAPI(cfg, deps).Register(r)
+	api.Register(r)
 
 	return r
 }
 
+func previewOriginMiddleware(sessions *controllers.SessionsController) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if sessions != nil && sessions.PreviewOrigin(w, r) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // mountHealth registers the liveness and readiness probes the Electron
 // supervisor polls before letting the renderer connect.
-func mountHealth(r chi.Router) {
-	r.Get("/healthz", handleHealthz)
-	r.Get("/readyz", handleReadyz)
+func mountHealth(r chi.Router, cfg config.Config) {
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		envelope.WriteJSON(w, http.StatusOK, daemonProbePayload("ok", cfg))
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		envelope.WriteJSON(w, http.StatusOK, daemonProbePayload("ready", cfg))
+	})
 }
 
 // mountControl registers the loopback daemon-control endpoints. /shutdown is
@@ -124,6 +142,7 @@ func mountMobile(r chi.Router, c *controllers.MobileController) {
 type cliInvokedRequest struct {
 	Command     string `json:"command"`
 	CommandPath string `json:"commandPath"`
+	ActorType   string `json:"actorType"`
 }
 
 type cliUsageErrorRequest struct {
@@ -132,10 +151,19 @@ type cliUsageErrorRequest struct {
 	Error       string `json:"error"`
 }
 
-func mountTelemetry(r chi.Router, sink ports.EventSink) {
+func mountTelemetry(r chi.Router, cfg config.Config, sink ports.EventSink) {
 	if sink == nil {
 		return
 	}
+	// CLI telemetry is capped to bounded uniques: ao.app.active once per UTC
+	// six-hour slot for user-context CLI activity (matching the renderer
+	// heartbeat) and ao.cli.invoked once per actor type + command path per UTC
+	// day. Scripts and agent sessions invoke read-only commands (status, ls,
+	// get) in polling loops, so raw invocation counts measure automation, not
+	// usage; bounded uniques keep the "which commands, how many users" signal
+	// without the firehose. The reservation state is persisted under DataDir so
+	// daemon restarts cannot turn polling loops back into raw event volume.
+	cliTelemetry := newCLITelemetryReservoir(cfg.DataDir)
 	r.Post("/internal/telemetry/cli-invoked", func(w http.ResponseWriter, req *http.Request) {
 		if !localControlRequest(req) {
 			envelope.WriteJSON(w, http.StatusForbidden, map[string]any{
@@ -156,30 +184,47 @@ func mountTelemetry(r chi.Router, sink ports.EventSink) {
 			envelope.WriteAPIError(w, req, http.StatusBadRequest, "bad_request", "COMMAND_PATH_REQUIRED", "commandPath is required", nil)
 			return
 		}
+		actorType := cliActorType(body.ActorType, body.CommandPath)
+		if actorType == "system" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if isRoutineInternalCLICommand(body.CommandPath) {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 
-		sink.Emit(req.Context(), ports.TelemetryEvent{
-			Name:       "ao.cli.invoked",
-			Source:     "cli",
-			OccurredAt: time.Now().UTC(),
-			Level:      ports.TelemetryLevelInfo,
-			RequestID:  middleware.GetReqID(req.Context()),
-			Payload: map[string]any{
-				"command":      body.Command,
-				"command_path": body.CommandPath,
-			},
-		})
-		sink.Emit(req.Context(), ports.TelemetryEvent{
-			Name:       "ao.app.active",
-			Source:     "cli",
-			OccurredAt: time.Now().UTC(),
-			Level:      ports.TelemetryLevelInfo,
-			RequestID:  middleware.GetReqID(req.Context()),
-			Payload: map[string]any{
-				"channel":      "cli",
-				"command":      body.Command,
-				"command_path": body.CommandPath,
-			},
-		})
+		if now := time.Now(); cliTelemetry.reserveInvoked(now, actorType, body.CommandPath) {
+			sink.Emit(req.Context(), ports.TelemetryEvent{
+				Name:       "ao.cli.invoked",
+				Source:     "cli",
+				OccurredAt: now.UTC(),
+				Level:      ports.TelemetryLevelInfo,
+				RequestID:  middleware.GetReqID(req.Context()),
+				Payload: map[string]any{
+					"command":      body.Command,
+					"command_path": body.CommandPath,
+					"actor_type":   actorType,
+				},
+			})
+		}
+		if actorType == "user" {
+			if now := time.Now(); cliTelemetry.reserveActive(now) {
+				sink.Emit(req.Context(), ports.TelemetryEvent{
+					Name:       "ao.app.active",
+					Source:     "cli",
+					OccurredAt: now.UTC(),
+					Level:      ports.TelemetryLevelInfo,
+					RequestID:  middleware.GetReqID(req.Context()),
+					Payload: map[string]any{
+						"channel":      "cli",
+						"command":      body.Command,
+						"command_path": body.CommandPath,
+						"actor_type":   actorType,
+					},
+				})
+			}
+		}
 		w.WriteHeader(http.StatusAccepted)
 	})
 	r.Post("/internal/telemetry/cli-usage-error", func(w http.ResponseWriter, req *http.Request) {
@@ -222,6 +267,39 @@ func mountTelemetry(r chi.Router, sink ports.EventSink) {
 	})
 }
 
+func isRoutineInternalCLICommand(commandPath string) bool {
+	switch strings.TrimSpace(commandPath) {
+	case "ao status",
+		"ao session ls",
+		"ao session get",
+		"ao project ls",
+		"ao project get",
+		"ao orchestrator ls",
+		"ao hooks",
+		"ao pty-host":
+		return true
+	default:
+		return false
+	}
+}
+
+func cliActorType(actorType, commandPath string) string {
+	switch actorType {
+	case "agent", "user":
+		return actorType
+	case "system":
+		return "system"
+	}
+	switch commandPath {
+	case "ao hooks":
+		return "agent"
+	case "ao daemon", "ao start", "ao completion", "ao help", "ao pty-host":
+		return "system"
+	default:
+		return "user"
+	}
+}
+
 // localControlRequest reports whether a control request is a trusted local
 // caller. The Go CLI client addresses the daemon by its loopback host and
 // never sets an Origin header; a cross-site browser fetch always carries an
@@ -245,19 +323,10 @@ func localControlRequest(r *http.Request) bool {
 	return false
 }
 
-// handleHealthz is the liveness probe: it answers 200 as long as the process is
-// up and serving. It does no dependency checks by design.
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	envelope.WriteJSON(w, http.StatusOK, daemonProbePayload("ok"))
-}
-
-// handleReadyz is the readiness probe. Dependency initialization happens before
-// the server is constructed, so a listening daemon is ready to answer requests.
-func handleReadyz(w http.ResponseWriter, _ *http.Request) {
-	envelope.WriteJSON(w, http.StatusOK, daemonProbePayload("ready"))
-}
-
-func daemonProbePayload(status string) map[string]any {
+// daemonProbePayload is shared by /healthz and /readyz. Dependency
+// initialization happens before the server is constructed, so a listening
+// daemon is ready to answer requests.
+func daemonProbePayload(status string, cfg config.Config) map[string]any {
 	payload := map[string]any{
 		"status":  status,
 		"service": daemonmeta.ServiceName,
@@ -268,6 +337,9 @@ func daemonProbePayload(status string) map[string]any {
 	}
 	if cwd, err := os.Getwd(); err == nil && cwd != "" {
 		payload["workingDirectory"] = cwd
+	}
+	if cfg.StartupWorkingDirectory != "" {
+		payload["startupWorkingDirectory"] = cfg.StartupWorkingDirectory
 	}
 	return payload
 }

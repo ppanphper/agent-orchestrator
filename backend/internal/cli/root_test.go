@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonmeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
@@ -32,6 +35,16 @@ func TestRootHelpDoesNotShowDaemon(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRootCommandsHaveUniqueNames(t *testing.T) {
+	seen := make(map[string]struct{})
+	for _, cmd := range NewRootCommand(Deps{}).Commands() {
+		if _, exists := seen[cmd.Name()]; exists {
+			t.Fatalf("root command %q is registered more than once", cmd.Name())
+		}
+		seen[cmd.Name()] = struct{}{}
 	}
 }
 
@@ -57,8 +70,9 @@ func TestCommandsRejectUnexpectedArgs(t *testing.T) {
 }
 
 func TestVersionEmitsCLIInvocationBestEffort(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
 	cfg := setConfigEnv(t)
-	called := make(chan string, 1)
+	called := make(chan map[string]string, 1)
 	if err := runfile.Write(cfg.runFile, runfile.Info{PID: os.Getpid(), Port: 3001, StartedAt: time.Unix(100, 0).UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +80,12 @@ func TestVersionEmitsCLIInvocationBestEffort(t *testing.T) {
 	if _, _, err := executeCLI(t, Deps{
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if req.URL.Path == "/internal/telemetry/cli-invoked" {
-				called <- req.URL.Path
+				defer req.Body.Close()
+				var body map[string]string
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatalf("decode telemetry body: %v", err)
+				}
+				called <- body
 				return jsonResponse(http.StatusAccepted, ""), nil
 			}
 			return jsonResponse(http.StatusNotFound, ""), nil
@@ -76,12 +95,76 @@ func TestVersionEmitsCLIInvocationBestEffort(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case path := <-called:
-		if path != "/internal/telemetry/cli-invoked" {
-			t.Fatalf("telemetry path = %q, want /internal/telemetry/cli-invoked", path)
+	case body := <-called:
+		if body["actorType"] != "user" {
+			t.Fatalf("telemetry actorType = %q, want user", body["actorType"])
 		}
 	default:
 		t.Fatal("version did not emit CLI invocation")
+	}
+}
+
+func TestShouldEmitCLIInvocationSkipsNonUsageAndRoutineInternalCommands(t *testing.T) {
+	byName := map[string]*cobra.Command{}
+	for _, cmd := range NewRootCommand(Deps{}).Commands() {
+		byName[cmd.Name()] = cmd
+	}
+	for name, want := range map[string]bool{
+		"daemon": false, // supervisor-driven bootstrapping, not human usage
+		"start":  false,
+		// hooks/status are routine internal polling paths; pty-host is only an
+		// internal Windows runtime process. Successful executions should not
+		// count as CLI usage.
+		"hooks":    false,
+		"pty-host": false,
+		"status":   false,
+		"spawn":    true,
+	} {
+		cmd, ok := byName[name]
+		if !ok {
+			t.Fatalf("command %q not registered", name)
+		}
+		if got := shouldEmitCLIInvocation(cmd); got != want {
+			t.Errorf("shouldEmitCLIInvocation(%s) = %v, want %v", cmd.CommandPath(), got, want)
+		}
+	}
+}
+
+func TestCLIInvocationActorType(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	byName := map[string]*cobra.Command{}
+	for _, cmd := range NewRootCommand(Deps{}).Commands() {
+		byName[cmd.Name()] = cmd
+	}
+
+	if got := cliInvocationActorType(byName["hooks"]); got != "agent" {
+		t.Fatalf("hooks actor = %q, want agent", got)
+	}
+	if got := cliInvocationActorType(byName["status"]); got != "user" {
+		t.Fatalf("status actor without session env = %q, want user", got)
+	}
+
+	t.Setenv("AO_SESSION_ID", "ao-session-1")
+	if got := cliInvocationActorType(byName["status"]); got != "agent" {
+		t.Fatalf("status actor with session env = %q, want agent", got)
+	}
+}
+
+func TestUsageErrorCommandDropsUserArgs(t *testing.T) {
+	for _, tc := range []struct {
+		args        []string
+		wantCommand string
+		wantPath    string
+	}{
+		{[]string{"send", "orchestrator-pack-5", "wake", "heartbeat.reconcile"}, "send", "ao send"},
+		{[]string{"status", "extra"}, "status", "ao status"},
+		{[]string{"not-a-command", "whatever"}, "ao", "ao"},
+		{[]string{"--bad-flag"}, "ao", "ao"},
+	} {
+		command, path := usageErrorCommand(tc.args)
+		if command != tc.wantCommand || path != tc.wantPath {
+			t.Errorf("usageErrorCommand(%v) = (%q, %q), want (%q, %q)", tc.args, command, path, tc.wantCommand, tc.wantPath)
+		}
 	}
 }
 

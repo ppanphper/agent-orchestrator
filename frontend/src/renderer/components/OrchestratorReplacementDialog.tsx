@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, RotateCw, X } from "lucide-react";
 import { findProjectOrchestrator, type WorkspaceSummary } from "../types/workspace";
 import { TopbarButton } from "./TopbarButton";
+import { useI18n } from "../lib/i18n";
 
 type OrchestratorReplacementDialogProps = {
 	projectId: string | null;
@@ -19,6 +20,7 @@ export function OrchestratorReplacementDialog({
 	onOpenChange,
 	onRetry,
 }: OrchestratorReplacementDialogProps) {
+	const { t } = useI18n();
 	const navigate = useNavigate();
 	const open = Boolean(projectId && error);
 	const orchestrator = projectId ? findProjectOrchestrator(workspaces, projectId) : undefined;
@@ -35,7 +37,7 @@ export function OrchestratorReplacementDialog({
 	return (
 		<Dialog.Root open={open} onOpenChange={onOpenChange}>
 			<Dialog.Portal>
-				<Dialog.Overlay className="fixed inset-0 z-overlay bg-scrim" />
+				<Dialog.Overlay className="dialog-overlay" />
 				<Dialog.Content className="fixed left-1/2 top-1/2 z-overlay w-dialog-orchestrator -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg">
 					<div className="flex items-start gap-3">
 						<div className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-muted text-warning">
@@ -43,10 +45,10 @@ export function OrchestratorReplacementDialog({
 						</div>
 						<div className="min-w-0 flex-1">
 							<Dialog.Title className="text-sm font-medium text-foreground">
-								Orchestrator replacement failed
+								{t("Orchestrator replacement failed")}
 							</Dialog.Title>
 							<Dialog.Description className="mt-2 text-[13px] leading-5 text-muted-foreground">
-								{error ?? "The project orchestrator could not be replaced."}
+								{error ?? t("The project orchestrator could not be replaced.")}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
@@ -55,19 +57,19 @@ export function OrchestratorReplacementDialog({
 								type="button"
 							>
 								<X className="size-icon-base" aria-hidden="true" />
-								<span className="sr-only">Close</span>
+								<span className="sr-only">{t("Close")}</span>
 							</button>
 						</Dialog.Close>
 					</div>
 					<div className="mt-5 flex justify-end gap-2">
 						{orchestrator ? (
 							<TopbarButton onClick={openCurrent} variant="primary">
-								Open current orchestrator
+								{t("Open current orchestrator")}
 							</TopbarButton>
 						) : null}
 						<TopbarButton onClick={() => projectId && onRetry(projectId)} variant="accent">
 							<RotateCw className="size-3.5" aria-hidden="true" />
-							Retry
+							{t("Retry")}
 						</TopbarButton>
 					</div>
 				</Dialog.Content>

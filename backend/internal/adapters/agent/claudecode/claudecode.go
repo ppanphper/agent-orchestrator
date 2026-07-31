@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -34,6 +33,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/agentbase"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/binaryutil"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
 const (
@@ -289,7 +289,7 @@ func (p *Plugin) AuthStatus(ctx context.Context) (ports.AgentAuthStatus, error) 
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(probeCtx, binary, "auth", "status").CombinedOutput()
+	out, err := aoprocess.CommandContext(probeCtx, binary, "auth", "status").CombinedOutput()
 	if probeCtx.Err() != nil {
 		return ports.AgentAuthStatusUnknown, probeCtx.Err()
 	}
@@ -461,7 +461,8 @@ var claudeBinarySpec = binaryutil.BinarySpec{
 	Names:         []string{"claude"},
 	WinNames:      []string{"claude.cmd", "claude.exe", "claude"},
 	UnixPaths:     []string{"/usr/local/bin/claude", "/opt/homebrew/bin/claude"},
-	UnixHomePaths: [][]string{{".local", "bin", "claude"}, {".npm", "bin", "claude"}, {".claude", "local", "claude"}},
+	UnixHomePaths: binaryutil.NodeManagedUnixHomePaths("claude", []string{".claude", "local", "claude"}),
+	NodeManaged:   true,
 	WinPaths: []binaryutil.WinPath{
 		{Base: binaryutil.WinAppData, Parts: []string{"npm", "claude.cmd"}},
 		{Base: binaryutil.WinAppData, Parts: []string{"npm", "claude.exe"}},

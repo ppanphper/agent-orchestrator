@@ -1,21 +1,69 @@
 import posthog from "posthog-js/dist/module.full.no-external";
 import { aoBridge } from "./bridge";
 import { isLoopbackHostname } from "./loopback";
+import { ORCHESTRATOR_SPAWN_SOURCES } from "./orchestrator-spawn-sources";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "../../shared/posthog-config";
 
 const POSTHOG_KEY = import.meta.env.VITE_AO_POSTHOG_KEY?.trim() || DEFAULT_POSTHOG_PROJECT_KEY;
 const POSTHOG_HOST = import.meta.env.VITE_AO_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
 const RELEASE_TAG = "2026-01-30";
+const TELEMETRY_SCHEMA_VERSION = 2;
 const REDACTED_LOCAL_URL = "[redacted-local-url]";
 const REDACTED_LOCAL_PATH = "[redacted-local-path]";
-const DAILY_ACTIVE_STORAGE_KEY = "ao.telemetry.lastActiveDate";
+const ACTIVE_STORAGE_KEY = "ao.telemetry.activeSlotsByDate";
+const ROUTE_VIEW_STORAGE_KEY = "ao.telemetry.routeViewsByDate";
 const EMBEDDED_LOCAL_URL_PATTERN =
 	/(?:\bfile:\/\/\/\S+|\bapp:\/\/renderer\/\S+|\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\S*)/gi;
+const POSTHOG_EVENT_NAME_ALIASES: Record<string, string> = {
+	"ao.app.active": "ao.v2.app.active",
+	"ao.renderer.route_viewed": "ao.v2.renderer.route_viewed",
+	"ao.renderer.loaded": "ao.v2.renderer.loaded",
+	"ao.renderer.api_error": "ao.v2.renderer.api_error",
+	"ao.renderer.daemon_failure": "ao.v2.renderer.daemon_failure",
+};
 
 let initPromise: Promise<boolean> | null = null;
 let errorHandlersBound = false;
 let telemetryContext: TelemetryProperties = {};
-let fallbackDailyActiveDate = "";
+let fallbackActiveDate = "";
+let fallbackActiveSlots = new Set<number>();
+let fallbackRouteViewDate = "";
+let fallbackRouteViewSurfaces = new Set<string>();
+
+// Bounds how many captures of a single event (or exception) name reach
+// PostHog. Mirrors the daemon-side RateLimitedSink: a re-render loop or
+// repeatedly-thrown exception must not turn into an unbounded PostHog bill.
+// A per-minute cap alone doesn't bound the daily total — a loop paced just
+// under it would sit under the ceiling forever — so this pairs a small burst
+// allowance with a hard daily ceiling per name.
+const EVENTS_PER_NAME_PER_MINUTE = 5;
+const EVENTS_PER_NAME_PER_DAY = 200;
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+const minuteWindows = new Map<string, { start: number; count: number }>();
+const dayWindows = new Map<string, { start: number; count: number }>();
+
+function reserveWindow(
+	windows: Map<string, { start: number; count: number }>,
+	name: string,
+	now: number,
+	size: number,
+	limit: number,
+): boolean {
+	const window = windows.get(name);
+	if (!window || now - window.start >= size) {
+		windows.set(name, { start: now, count: 1 });
+		return true;
+	}
+	if (window.count >= limit) return false;
+	window.count += 1;
+	return true;
+}
+
+export function reserveCapture(name: string, now = Date.now()): boolean {
+	if (!reserveWindow(minuteWindows, name, now, MINUTE_MS, EVENTS_PER_NAME_PER_MINUTE)) return false;
+	return reserveWindow(dayWindows, name, now, DAY_MS, EVENTS_PER_NAME_PER_DAY);
+}
 
 type TelemetryProperties = Record<string, unknown>;
 type DailyActiveStorage = Pick<Storage, "getItem" | "setItem">;
@@ -27,7 +75,7 @@ type DailyActiveEventTarget = {
 export type DailyActiveHeartbeatOptions = {
 	storage?: DailyActiveStorage;
 	now?: () => Date;
-	capture: () => void;
+	capture: () => boolean | void | Promise<boolean | void>;
 	window: DailyActiveEventTarget;
 	document: DailyActiveEventTarget & Pick<Document, "visibilityState">;
 };
@@ -39,28 +87,110 @@ export function buildTelemetryContext(appVersion: string, platform: string): Tel
 		ao_version: version,
 		platform,
 		build_mode: import.meta.env.DEV ? "dev" : "packaged",
+		telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
 	};
 }
 
-function withTelemetryContext(properties: TelemetryProperties): TelemetryProperties {
-	return { ...telemetryContext, ...properties };
+export function withTelemetryContext(properties: TelemetryProperties): TelemetryProperties {
+	return { ...telemetryContext, ...properties, $process_person_profile: false };
+}
+
+export function postHogEventName(event: string): string {
+	return POSTHOG_EVENT_NAME_ALIASES[event] ?? event;
 }
 
 export function reserveDailyActiveCapture(storage?: DailyActiveStorage, now = new Date()): boolean {
 	const utcDate = now.toISOString().slice(0, 10);
-	if (!storage) {
-		if (fallbackDailyActiveDate === utcDate) return false;
-		fallbackDailyActiveDate = utcDate;
+	const slot = activeCaptureSlot(now);
+	const reserveFallback = () => {
+		if (fallbackActiveDate !== utcDate) {
+			fallbackActiveDate = utcDate;
+			fallbackActiveSlots = new Set<number>();
+		}
+		if (fallbackActiveSlots.has(slot)) return false;
+		fallbackActiveSlots.add(slot);
 		return true;
-	}
+	};
+
+	if (!storage) return reserveFallback();
 	try {
-		if (storage.getItem(DAILY_ACTIVE_STORAGE_KEY) === utcDate) return false;
-		storage.setItem(DAILY_ACTIVE_STORAGE_KEY, utcDate);
+		const raw = storage.getItem(ACTIVE_STORAGE_KEY);
+		const parsed = raw ? (JSON.parse(raw) as { date?: unknown; slots?: unknown }) : {};
+		const slots =
+			parsed.date === utcDate && Array.isArray(parsed.slots)
+				? parsed.slots.filter((value): value is number => Number.isInteger(value) && value >= 0 && value < 4)
+				: [];
+		if (slots.includes(slot)) return false;
+		slots.push(slot);
+		storage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify({ date: utcDate, slots }));
 		return true;
 	} catch {
-		if (fallbackDailyActiveDate === utcDate) return false;
-		fallbackDailyActiveDate = utcDate;
+		return reserveFallback();
+	}
+}
+
+function releaseDailyActiveCapture(storage?: DailyActiveStorage, now = new Date()): void {
+	const utcDate = now.toISOString().slice(0, 10);
+	const slot = activeCaptureSlot(now);
+	if (fallbackActiveDate === utcDate) fallbackActiveSlots.delete(slot);
+	if (!storage) return;
+
+	try {
+		const raw = storage.getItem(ACTIVE_STORAGE_KEY);
+		const parsed = raw ? (JSON.parse(raw) as { date?: unknown; slots?: unknown }) : {};
+		if (parsed.date !== utcDate || !Array.isArray(parsed.slots)) return;
+		const slots = parsed.slots.filter(
+			(value): value is number => Number.isInteger(value) && value >= 0 && value < 4 && value !== slot,
+		);
+		storage.setItem(ACTIVE_STORAGE_KEY, JSON.stringify({ date: utcDate, slots }));
+	} catch {
+		// The fallback reservation was already released above.
+	}
+}
+
+function activeCaptureSlot(now: Date): number {
+	return Math.floor(now.getUTCHours() / 6);
+}
+
+export function reserveRouteViewCapture(
+	storage: DailyActiveStorage | undefined,
+	surface: string,
+	now = new Date(),
+): boolean {
+	const normalizedSurface = surface.trim() || "unknown";
+	const utcDate = now.toISOString().slice(0, 10);
+	const reserveFallback = () => {
+		if (fallbackRouteViewDate !== utcDate) {
+			fallbackRouteViewDate = utcDate;
+			fallbackRouteViewSurfaces = new Set<string>();
+		}
+		if (fallbackRouteViewSurfaces.has(normalizedSurface)) return false;
+		fallbackRouteViewSurfaces.add(normalizedSurface);
 		return true;
+	};
+
+	if (!storage) return reserveFallback();
+	try {
+		const raw = storage.getItem(ROUTE_VIEW_STORAGE_KEY);
+		const parsed = raw ? (JSON.parse(raw) as { date?: unknown; surfaces?: unknown }) : {};
+		const surfaces =
+			parsed.date === utcDate && Array.isArray(parsed.surfaces)
+				? parsed.surfaces.filter((value): value is string => typeof value === "string")
+				: [];
+		if (surfaces.includes(normalizedSurface)) return false;
+		surfaces.push(normalizedSurface);
+		storage.setItem(ROUTE_VIEW_STORAGE_KEY, JSON.stringify({ date: utcDate, surfaces }));
+		return true;
+	} catch {
+		return reserveFallback();
+	}
+}
+
+function telemetryStorage(): DailyActiveStorage | undefined {
+	try {
+		return window.localStorage;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -72,9 +202,22 @@ export function startDailyActiveHeartbeat({
 	document,
 }: DailyActiveHeartbeatOptions): () => void {
 	const maybeCapture = () => {
-		if (reserveDailyActiveCapture(storage, now())) {
-			capture();
+		const captureTime = now();
+		if (!reserveDailyActiveCapture(storage, captureTime)) return;
+
+		let result: boolean | void | Promise<boolean | void>;
+		try {
+			result = capture();
+		} catch {
+			releaseDailyActiveCapture(storage, captureTime);
+			return;
 		}
+		void Promise.resolve(result).then(
+			(captured) => {
+				if (captured === false) releaseDailyActiveCapture(storage, captureTime);
+			},
+			() => releaseDailyActiveCapture(storage, captureTime),
+		);
 	};
 	const onVisibilityChange = () => {
 		if (document.visibilityState === "visible") {
@@ -112,7 +255,7 @@ function normalizeException(reason: unknown): Error {
 
 function routeSurface(pathname: string): string {
 	if (pathname === "/") return "home";
-	if (/^\/prs(?:\/|$)/.test(pathname)) return "pull_requests";
+	if (/^\/settings(?:\/|$)/.test(pathname)) return "global_settings";
 	if (/^\/projects\/[^/]+\/sessions\/[^/]+$/.test(pathname)) return "session_detail";
 	if (/^\/projects\/[^/]+(?:\/|$)/.test(pathname)) {
 		if (/\/settings$/.test(pathname)) return "project_settings";
@@ -210,18 +353,7 @@ async function sanitizeRendererContextProperties(properties?: TelemetryPropertie
 	return safe;
 }
 
-// Allowed `source` enum for the orchestrator-spawn triad. Kept as a literal set
-// here (rather than imported from spawn-orchestrator.ts, which imports this
-// module) to avoid a cycle; keep in sync with OrchestratorSpawnSource.
-const ORCHESTRATOR_SPAWN_SOURCES = new Set([
-	"board",
-	"restore_dialog",
-	"topbar",
-	"sidebar",
-	"project_add",
-	"settings",
-	"restart",
-]);
+const ORCHESTRATOR_SPAWN_SOURCE_SET = new Set<string>(ORCHESTRATOR_SPAWN_SOURCES);
 
 export async function sanitizeRendererProperties(
 	event: string,
@@ -261,7 +393,7 @@ export async function sanitizeRendererProperties(
 		case "ao.renderer.orchestrator_spawn_failed": {
 			const projectIDHash = await hashedTelemetryID(properties?.project_id);
 			if (projectIDHash) safe.project_id_hash = projectIDHash;
-			if (typeof properties?.source === "string" && ORCHESTRATOR_SPAWN_SOURCES.has(properties.source)) {
+			if (typeof properties?.source === "string" && ORCHESTRATOR_SPAWN_SOURCE_SET.has(properties.source)) {
 				safe.source = properties.source;
 			}
 			break;
@@ -289,6 +421,10 @@ export async function sanitizeRendererProperties(
 			if (properties?.reason === "open_timeout" || properties?.reason === "pane_error") {
 				safe.reason = properties.reason;
 			}
+			break;
+		case "ao.renderer.session_state_unknown":
+			if (properties?.field === "status" || properties?.field === "activity") safe.field = properties.field;
+			if (properties?.reason === "missing" || properties?.reason === "unrecognized") safe.reason = properties.reason;
 			break;
 	}
 	return safe;
@@ -327,6 +463,39 @@ function bindErrorHandlers() {
 	});
 }
 
+type PostHogInitOptions = NonNullable<Parameters<typeof posthog.init>[1]>;
+
+export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
+	return {
+		api_host: POSTHOG_HOST,
+		defaults: RELEASE_TAG,
+		autocapture: false,
+		capture_pageview: false,
+		capture_exceptions: false,
+		capture_performance: false,
+		disable_session_recording: true,
+		// AO owns the stable random installation ID. Memory-only SDK
+		// persistence prevents legacy identified state from replacing it after
+		// an upgrade; the AO-owned heartbeat and route reservations continue to
+		// use window.localStorage independently.
+		persistence: "memory",
+		person_profiles: "never",
+		bootstrap: {
+			distinctID: distinctId,
+			isIdentifiedID: false,
+		},
+		before_send: (event) => (event ? sanitizePostHogCaptureResult(event) : event),
+		session_recording: {
+			maskCapturedNetworkRequestFn: (request) => {
+				if (request.name) {
+					request.name = sanitizeReplayRequestName(request.name);
+				}
+				return request;
+			},
+		},
+	};
+}
+
 export async function initTelemetry(): Promise<boolean> {
 	if (initPromise) return initPromise;
 	initPromise = (async () => {
@@ -334,64 +503,49 @@ export async function initTelemetry(): Promise<boolean> {
 		const bootstrap = await aoBridge.telemetry.getBootstrap();
 		if (!bootstrap) return false;
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform);
-		posthog.init(POSTHOG_KEY, {
-			api_host: POSTHOG_HOST,
-			defaults: RELEASE_TAG,
-			autocapture: false,
-			capture_pageview: false,
-			capture_exceptions: false,
-			persistence: "localStorage",
-			before_send: (event) => (event ? sanitizePostHogCaptureResult(event) : event),
-			session_recording: {
-				maskCapturedNetworkRequestFn: (request) => {
-					if (request.name) {
-						request.name = sanitizeReplayRequestName(request.name);
-					}
-					return request;
-				},
-			},
-		});
-		posthog.identify(bootstrap.distinctId, {
-			...telemetryContext,
-			surface: "renderer",
-		});
+		posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
 		posthog.register({
 			...telemetryContext,
 			surface: "renderer",
 		});
 		bindErrorHandlers();
-		let storage: DailyActiveStorage | undefined;
-		try {
-			storage = window.localStorage;
-		} catch {
-			storage = undefined;
-		}
 		startDailyActiveHeartbeat({
-			storage,
+			storage: telemetryStorage(),
 			window,
 			document,
-			capture: () => {
-				void (async () => {
+			capture: async () =>
+				Boolean(
 					posthog.capture(
-						"ao.app.active",
+						postHogEventName("ao.app.active"),
 						withTelemetryContext(await sanitizeRendererProperties("ao.app.active", { channel: "renderer" })),
-					);
-				})();
-			},
+						{ send_instantly: true },
+					),
+				),
 		});
-		posthog.capture("ao.renderer.loaded", withTelemetryContext(await sanitizeRendererProperties("ao.renderer.loaded")));
+		posthog.capture(
+			postHogEventName("ao.renderer.loaded"),
+			withTelemetryContext(await sanitizeRendererProperties("ao.renderer.loaded")),
+		);
 		return true;
 	})().catch(() => false);
 	return initPromise;
 }
 
 export async function captureRendererEvent(event: string, properties?: Record<string, unknown>): Promise<void> {
+	const sanitizedProperties = await sanitizeRendererProperties(event, properties);
+	if (event === "ao.renderer.route_viewed") {
+		const surface = typeof sanitizedProperties.surface === "string" ? sanitizedProperties.surface : "other";
+		if (!reserveRouteViewCapture(telemetryStorage(), surface)) return;
+	} else if (!reserveCapture(event)) {
+		return;
+	}
 	if (!(await initTelemetry())) return;
-	const safeProperties = withTelemetryContext(await sanitizeRendererProperties(event, properties));
-	posthog.capture(event, safeProperties);
+	const safeProperties = withTelemetryContext(sanitizedProperties);
+	posthog.capture(postHogEventName(event), safeProperties);
 }
 
 export async function captureRendererException(error: unknown, properties?: Record<string, unknown>): Promise<void> {
+	if (!reserveCapture(`exception:${exceptionName(error)}`)) return;
 	if (!(await initTelemetry())) return;
 	const safeProperties = withTelemetryContext(await sanitizeRendererExceptionProperties(error, properties));
 	posthog.captureException(normalizeException(error), safeProperties);

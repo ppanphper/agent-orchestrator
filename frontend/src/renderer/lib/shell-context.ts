@@ -7,6 +7,7 @@ import type { useDaemonStatus } from "../hooks/useDaemonStatus";
 // it lives in the shell and is handed down here rather than re-run per route.
 export type ShellContextValue = {
 	daemonStatus: ReturnType<typeof useDaemonStatus>;
+	workspaceStartupState: "loading" | "ready" | "error";
 	createProject: (input: {
 		path: string;
 		workerAgent: string;
@@ -25,4 +26,10 @@ export function useShell(): ShellContextValue {
 	const ctx = useContext(ShellContext);
 	if (!ctx) throw new Error("useShell must be used within the _shell layout route");
 	return ctx;
+}
+
+// Non-throwing variant for components that also render outside the shell
+// (e.g. Sidebar in unit tests): returns null instead of throwing.
+export function useShellMaybe(): ShellContextValue | null {
+	return useContext(ShellContext);
 }
