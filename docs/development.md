@@ -154,6 +154,21 @@ npm run dev            # Electron dev mode
 npm run dev:web        # Web-only (no Electron, for quick UI iteration)
 ```
 
+For a background Electron development session managed with tmux, run these
+commands from the repository root:
+
+```bash
+./scripts/ao-dev.sh start
+./scripts/ao-dev.sh status
+./scripts/ao-dev.sh restart
+./scripts/ao-dev.sh logs       # detach with Ctrl-b d
+./scripts/ao-dev.sh stop
+```
+
+The helper manages only the `ao-dev` tmux session. It automatically selects an
+installed Go toolchain that satisfies `backend/go.mod`; use
+`AO_DEV_TMUX_SESSION` to override the session name.
+
 ### Build
 
 ```bash
